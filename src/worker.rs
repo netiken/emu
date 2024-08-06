@@ -141,7 +141,7 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<RunResults, Status> {
     let deltas = ctx
         .delta_distribution()
         .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
-    let mut reservoir = SamplingReservoir::<Nanosecs, NR_PATH_SAMPLES>::new();
+    let mut reservoir = SamplingReservoir::<(Bytes, Nanosecs), NR_PATH_SAMPLES>::new();
     let duration = Duration::from_secs(ctx.duration.into_inner() as u64);
     let now = Instant::now();
     let mut cur = now;
@@ -164,21 +164,25 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<RunResults, Status> {
                 .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
                 .await;
             let latency = now.elapsed();
-            Nanosecs::new(latency.as_nanos() as u64)
+            (
+                Bytes::new(size as u64),
+                Nanosecs::new(latency.as_nanos() as u64),
+            )
         });
         handles.push(handle);
     }
     for handle in handles {
-        let latency = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
-        reservoir.sample(latency);
+        let pair = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
+        reservoir.sample(pair);
     }
     Ok(RunResults {
         samples: reservoir
             .into_ordered_iter()
-            .map(|latency| Sample {
+            .map(|(size, latency)| Sample {
                 src: ctx.src,
                 dst: ctx.dst,
                 dscp: ctx.dscp,
+                size,
                 latency,
             })
             .collect(),

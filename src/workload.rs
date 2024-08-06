@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     distribution::{DistShape, Ecdf, EcdfError},
     proto,
-    units::{Dscp, Mbps, Nanosecs, Secs},
+    units::{Bytes, Dscp, Mbps, Nanosecs, Secs},
     Error, WorkerId,
 };
 
@@ -187,6 +187,7 @@ pub struct Sample {
     pub src: WorkerId,
     pub dst: WorkerId,
     pub dscp: Dscp,
+    pub size: Bytes,
     pub latency: Nanosecs,
 }
 
@@ -200,12 +201,15 @@ impl TryFrom<proto::Sample> for Sample {
         let dst = WorkerId::new(dst);
         let dscp = proto.dscp.ok_or(Error::MissingField("dscp"))?;
         let dscp = Dscp::try_new(dscp).map_err(|_| Error::InvalidDscp(dscp))?;
+        let size = proto.size_bytes.ok_or(Error::MissingField("size_bytes"))?;
+        let size = Bytes::new(size);
         let latency_ns = proto.latency_ns.ok_or(Error::MissingField("latency_ns"))?;
         let latency = Nanosecs::new(latency_ns);
         Ok(Self {
             src,
             dst,
             dscp,
+            size,
             latency,
         })
     }
@@ -217,6 +221,7 @@ impl From<Sample> for proto::Sample {
             src: Some(value.src.into_inner()),
             dst: Some(value.dst.into_inner()),
             dscp: Some(value.dscp.into_inner()),
+            size_bytes: Some(value.size.into_inner()),
             latency_ns: Some(value.latency.into_inner()),
         }
     }
