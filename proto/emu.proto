@@ -1,0 +1,85 @@
+syntax = "proto3";
+package emu;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+
+service EmuManager {
+    rpc RegisterWorker(WorkerRegistration) returns (google.protobuf.Empty);
+
+    rpc Run(RunSpecification) returns (RunResults);
+}
+
+message WorkerRegistration {
+    google.protobuf.UInt32Value id = 1;
+    WorkerAddress address = 2;
+}
+
+message WorkerAddress {
+    string ip_address = 1;
+    uint32 port = 2;
+}
+
+message RunSpecification {
+    repeated P2PWorkload p2p_workloads = 1;
+    map<string, Ecdf> size_distributions = 2;
+}
+
+message ExponentialShape {}
+
+message LogNormalShape {
+    double sigma = 1;
+}
+
+message DistShape {
+    oneof shape {
+        ExponentialShape exponential = 1;
+        LogNormalShape log_normal = 2;
+    }
+}
+
+message P2PWorkload {
+    google.protobuf.UInt32Value src = 1;
+    google.protobuf.UInt32Value dst = 2;
+    google.protobuf.UInt32Value dscp = 3;
+    uint32 rate_mbps = 4;
+    string size_distribution_name = 5;
+    DistShape delta_distribution_shape = 6;
+    uint32 duration_secs = 7;
+}
+
+message Ecdf {
+    repeated CdfPoint points = 1;
+}
+
+message CdfPoint {
+    double x = 1;
+    double y = 2;
+}
+
+message RunResults {
+    repeated Sample samples = 1;
+}
+
+message Sample {
+    google.protobuf.UInt32Value src = 1;
+    google.protobuf.UInt32Value dst = 2;
+    google.protobuf.UInt32Value dscp = 3;
+    google.protobuf.UInt64Value latency_ns = 4;
+}
+
+message GenericRequestResponse {
+    bytes data = 1;
+}
+
+service EmuWorker {
+    rpc IntroducePeers(WorkerAddressMap) returns (google.protobuf.Empty);
+
+    rpc Run(RunSpecification) returns (RunResults);
+
+    rpc GenericRpc(GenericRequestResponse) returns (GenericRequestResponse);
+}
+
+message WorkerAddressMap {
+    map<uint32, WorkerAddress> workers = 1;
+}
