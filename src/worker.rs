@@ -211,8 +211,9 @@ impl P2PContext {
     async fn connect(&self) -> Result<EmuWorkerClient<Channel>, Status> {
         let addr = self.dst_addr.socket_addr();
         let endpoint = format!("http://{}", addr);
+        let tos = self.dscp.into_inner() << 2;
         let mut connector = HttpConnector::new();
-        connector.set_tos(Some(self.dscp.into_inner()));
+        connector.set_tos(Some(tos));
         let channel = Endpoint::try_from(endpoint)
             .map_err(|e| Status::from_error(Box::new(e)))?
             .connect_with_connector(connector)
