@@ -7,7 +7,7 @@ import "google/protobuf/wrappers.proto";
 service EmuManager {
     rpc RegisterWorker(WorkerRegistration) returns (google.protobuf.Empty);
 
-    rpc Run(RunSpecification) returns (RunResults);
+    rpc Run(RunSpecification) returns (google.protobuf.Empty);
 }
 
 message WorkerRegistration {
@@ -57,18 +57,6 @@ message CdfPoint {
     double y = 2;
 }
 
-message RunResults {
-    repeated Sample samples = 1;
-}
-
-message Sample {
-    google.protobuf.UInt32Value src = 1;
-    google.protobuf.UInt32Value dst = 2;
-    google.protobuf.UInt32Value dscp = 3;
-    google.protobuf.UInt64Value size_bytes = 4;
-    google.protobuf.UInt64Value latency_ns = 5;
-}
-
 message GenericRequestResponse {
     bytes data = 1;
 }
@@ -76,7 +64,7 @@ message GenericRequestResponse {
 service EmuWorker {
     rpc IntroducePeers(WorkerAddressMap) returns (google.protobuf.Empty);
 
-    rpc Run(RunSpecification) returns (RunResults);
+    rpc Run(RunSpecification) returns (google.protobuf.Empty);
 
     rpc GenericRpc(GenericRequestResponse) returns (GenericRequestResponse);
 }

@@ -6,7 +6,7 @@ use tonic::{Request, Response, Status};
 use crate::proto::emu_manager_server::EmuManager;
 use crate::proto::emu_worker_client::EmuWorkerClient;
 use crate::worker::{WorkerAddress, WorkerId, WorkerRegistration};
-use crate::{proto, RunResults, RunSpecification};
+use crate::{proto, RunSpecification};
 
 #[derive(Debug, Default)]
 pub struct Manager {
@@ -31,16 +31,12 @@ impl EmuManager for Manager {
         Ok(Response::new(()))
     }
 
-    async fn run(
-        &self,
-        request: Request<proto::RunSpecification>,
-    ) -> Result<Response<proto::RunResults>, Status> {
+    async fn run(&self, request: Request<proto::RunSpecification>) -> Result<Response<()>, Status> {
         let spec = RunSpecification::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
         self.introduce_peers_to_workers().await?;
-        let results = self.run_workers(spec).await?;
-        let response = Response::new(results.into());
-        Ok(response)
+        self.run_workers(spec).await?;
+        Ok(Response::new(()))
     }
 }
 
@@ -80,29 +76,25 @@ impl Manager {
         Ok(())
     }
 
-    async fn run_workers(&self, spec: RunSpecification) -> Result<RunResults, Status> {
+    async fn run_workers(&self, spec: RunSpecification) -> Result<(), Status> {
         let mut handles = Vec::new();
         for entry in self.wid2client.iter() {
             let mut client = entry.value().clone();
             let spec = spec.clone();
             let handle = task::spawn(async move {
-                let results = client
+                client
                     .run(Request::new(spec.into()))
                     .await
                     .map_err(|e| Status::from_error(Box::new(e)))?;
-                Result::<_, Status>::Ok(results.into_inner())
+                Result::<_, Status>::Ok(())
             });
             handles.push(handle);
         }
-        let mut results = RunResults::default();
         for handle in handles {
-            let results_ = handle
+            handle
                 .await
                 .map_err(|e| Status::from_error(Box::new(e)))??;
-            let results_ =
-                RunResults::try_from(results_).map_err(|e| Status::from_error(Box::new(e)))?;
-            results.extend(results_);
         }
-        Ok(results)
+        Ok(())
     }
 }

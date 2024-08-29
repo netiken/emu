@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     distribution::{DistShape, Ecdf, EcdfError},
     proto,
-    units::{Bytes, Dscp, Mbps, Nanosecs, Secs},
+    units::{Dscp, Mbps, Secs},
     Error, WorkerId,
 };
 
@@ -146,83 +146,6 @@ impl From<P2PWorkload> for proto::P2pWorkload {
                 },
             }),
             duration_secs: value.duration.into_inner(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RunResults {
-    pub samples: Vec<Sample>,
-}
-
-impl RunResults {
-    pub fn extend(&mut self, other: Self) {
-        self.samples.extend(other.samples);
-    }
-}
-
-impl TryFrom<proto::RunResults> for RunResults {
-    type Error = Error;
-
-    fn try_from(proto: proto::RunResults) -> Result<Self, Self::Error> {
-        let samples = proto
-            .samples
-            .into_iter()
-            .map(Sample::try_from)
-            .collect::<Result<_, _>>()?;
-        Ok(Self { samples })
-    }
-}
-
-impl From<RunResults> for proto::RunResults {
-    fn from(value: RunResults) -> Self {
-        Self {
-            samples: value.samples.into_iter().map(proto::Sample::from).collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Sample {
-    pub src: WorkerId,
-    pub dst: WorkerId,
-    pub dscp: Dscp,
-    pub size: Bytes,
-    pub latency: Nanosecs,
-}
-
-impl TryFrom<proto::Sample> for Sample {
-    type Error = Error;
-
-    fn try_from(proto: proto::Sample) -> Result<Self, Self::Error> {
-        let src = proto.src.ok_or(Error::MissingField("src"))?;
-        let src = WorkerId::new(src);
-        let dst = proto.dst.ok_or(Error::MissingField("dst"))?;
-        let dst = WorkerId::new(dst);
-        let dscp = proto.dscp.ok_or(Error::MissingField("dscp"))?;
-        let dscp = Dscp::try_new(dscp).map_err(|_| Error::InvalidDscp(dscp))?;
-        let size = proto.size_bytes.ok_or(Error::MissingField("size_bytes"))?;
-        let size = Bytes::new(size);
-        let latency_ns = proto.latency_ns.ok_or(Error::MissingField("latency_ns"))?;
-        let latency = Nanosecs::new(latency_ns);
-        Ok(Self {
-            src,
-            dst,
-            dscp,
-            size,
-            latency,
-        })
-    }
-}
-
-impl From<Sample> for proto::Sample {
-    fn from(value: Sample) -> Self {
-        Self {
-            src: Some(value.src.into_inner()),
-            dst: Some(value.dst.into_inner()),
-            dscp: Some(value.dscp.into_inner()),
-            size_bytes: Some(value.size.into_inner()),
-            latency_ns: Some(value.latency.into_inner()),
         }
     }
 }

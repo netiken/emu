@@ -8,11 +8,16 @@ use crate::{
     Manager, Worker, WorkerId,
 };
 use clap::Subcommand;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::{
     task,
     time::{self, Duration},
 };
 use tonic::{transport::Server, Request};
+
+const DEFAULT_BUCKETS_MS: &[f64] = &[
+    10e-3, 100e-3, 200e-3, 400e-3, 600e-3, 800e-3, 1.0, 2.0, 5.0, 10.0, 100.0, 1e3,
+];
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
@@ -29,6 +34,9 @@ pub enum Command {
 
         #[arg(short, long)]
         manager_addr: SocketAddr,
+
+        #[arg(long, default_value = "0.0.0.0:9000")]
+        metrics_addr: SocketAddr,
     },
     Run {
         #[arg(short, long)]
@@ -36,9 +44,6 @@ pub enum Command {
 
         #[arg(short, long)]
         manager_addr: SocketAddr,
-
-        #[arg(short, long)]
-        out: PathBuf,
     },
 }
 
@@ -57,7 +62,9 @@ impl Command {
                 id,
                 advertise_addr,
                 manager_addr,
+                metrics_addr,
             } => {
+                init_metrics(metrics_addr, DEFAULT_BUCKETS_MS)?;
                 let handle = task::spawn(async move {
                     let worker = Worker::new(id);
                     let addr = format!("0.0.0.0:{}", advertise_addr.port()).parse()?;
@@ -71,34 +78,22 @@ impl Command {
                 register_worker(id, advertise_addr, manager_addr).await?;
                 handle.await??;
             }
-            Command::Run {
-                spec,
-                manager_addr,
-                out,
-            } => {
+            Command::Run { spec, manager_addr } => {
                 let spec = fs::read_to_string(spec)?;
                 let spec: crate::RunSpecification = serde_json::from_str(&spec)?;
-                let results = run(spec, manager_addr).await?;
-                let mut wtr = csv::Writer::from_path(&out)?;
-                for record in results.samples {
-                    wtr.serialize(record)?;
-                }
-                wtr.flush()?;
+                run(spec, manager_addr).await?;
             }
         }
         Ok(())
     }
 }
 
-async fn run(
-    spec: crate::RunSpecification,
-    manager_addr: SocketAddr,
-) -> anyhow::Result<crate::RunResults> {
+async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
     let spec: RunSpecification = spec.into();
     let request = Request::new(spec);
-    let response = client.run(request).await?;
-    Ok(response.into_inner().try_into()?)
+    let _response = client.run(request).await?;
+    Ok(())
 }
 
 async fn register_worker(
@@ -116,5 +111,13 @@ async fn register_worker(
         address: Some(address),
     });
     client.register_worker(request).await?;
+    Ok(())
+}
+
+fn init_metrics(addr: SocketAddr, buckets: &[f64]) -> anyhow::Result<()> {
+    PrometheusBuilder::new()
+        .with_http_listener(addr)
+        .set_buckets(buckets)?
+        .install()?;
     Ok(())
 }

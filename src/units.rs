@@ -85,6 +85,7 @@ impl From<Mbps> for BitsPerSec {
     validate(less = 64),
     derive(
         Debug,
+        Display,
         Clone,
         Copy,
         PartialEq,

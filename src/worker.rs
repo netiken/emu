@@ -1,5 +1,6 @@
 use dashmap::DashMap;
-use infinity_sampler::SamplingReservoir;
+use derivative::Derivative;
+use metrics::Histogram;
 use rand::prelude::*;
 use tokio::{
     task,
@@ -15,14 +16,13 @@ use crate::{
     proto::{self, emu_worker_client::EmuWorkerClient, emu_worker_server::EmuWorker},
     units::{BitsPerSec, Bytes, Dscp, Mbps, Nanosecs, Secs},
     util::http::HttpConnector,
-    Error, RunResults, RunSpecification, Sample,
+    Error, RunSpecification,
 };
 use std::{
+    collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
-
-const NR_PATH_SAMPLES: usize = 2_usize.pow(14);
 
 #[nutype::nutype(derive(
     Debug,
@@ -71,10 +71,11 @@ impl EmuWorker for Worker {
     async fn run(
         &self,
         request: Request<proto::RunSpecification>,
-    ) -> Result<Response<proto::RunResults>, tonic::Status> {
+    ) -> Result<Response<()>, tonic::Status> {
         let spec = RunSpecification::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
         let mut handles = Vec::new();
+        let mut histograms = HashMap::<Dscp, Histogram>::new();
         for workload in spec.p2p_workloads {
             if workload.src != self.id {
                 continue;
@@ -100,6 +101,9 @@ impl EmuWorker for Worker {
                         workload.size_distribution_name
                     ))
                 })?;
+            let histogram = histograms.entry(workload.dscp).or_insert_with(
+                || metrics::histogram!("latency_ms", "dscp" => workload.dscp.to_string()),
+            );
             let ctx = P2PContext {
                 src: self.id,
                 dst: workload.dst,
@@ -109,19 +113,18 @@ impl EmuWorker for Worker {
                 sizes: Arc::clone(sizes),
                 deltas: workload.delta_distribution_shape,
                 duration: workload.duration,
+                histogram: histogram.clone(),
             };
             // Initiate the point-to-point workload.
             let handle = task::spawn(run_p2p_workload(ctx));
             handles.push(handle)
         }
-        let mut results = RunResults::default();
         for handle in handles {
-            let results_ = handle
+            handle
                 .await
                 .map_err(|e| Status::from_error(Box::new(e)))??;
-            results.extend(results_);
         }
-        Ok(Response::new(results.into()))
+        Ok(Response::new(()))
     }
 
     async fn generic_rpc(
@@ -134,14 +137,13 @@ impl EmuWorker for Worker {
 }
 
 // Runs a point-to-point workload in open-loop.
-async fn run_p2p_workload(ctx: P2PContext) -> Result<RunResults, Status> {
+async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
     let client = ctx.connect().await?;
     let mut handles = Vec::new();
     let mut rng = StdRng::from_entropy();
     let deltas = ctx
         .delta_distribution()
         .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
-    let mut reservoir = SamplingReservoir::<(Bytes, Nanosecs), NR_PATH_SAMPLES>::new();
     let duration = Duration::from_secs(ctx.duration.into_inner() as u64);
     let now = Instant::now();
     let mut cur = now;
@@ -163,33 +165,20 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<RunResults, Status> {
             let _ = client
                 .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
                 .await;
-            let latency = now.elapsed();
-            (
-                Bytes::new(size as u64),
-                Nanosecs::new(latency.as_nanos() as u64),
-            )
+            now.elapsed()
         });
         handles.push(handle);
     }
     for handle in handles {
-        let pair = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
-        reservoir.sample(pair);
+        let latency = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
+        ctx.histogram
+            .record((latency.as_nanos() as f64).round() / 1e6);
     }
-    Ok(RunResults {
-        samples: reservoir
-            .into_ordered_iter()
-            .map(|(size, latency)| Sample {
-                src: ctx.src,
-                dst: ctx.dst,
-                dscp: ctx.dscp,
-                size,
-                latency,
-            })
-            .collect(),
-    })
+    Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
 struct P2PContext {
     src: WorkerId,
     dst: WorkerId,
@@ -199,6 +188,8 @@ struct P2PContext {
     sizes: Arc<Ecdf>,
     deltas: DistShape,
     duration: Secs,
+    #[derivative(Debug = "ignore")]
+    histogram: Histogram,
 }
 
 impl P2PContext {
