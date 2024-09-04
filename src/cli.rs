@@ -13,7 +13,7 @@ use tokio::{
     task,
     time::{self, Duration},
 };
-use tonic::{transport::Server, Request};
+use tonic::{transport::Server, Code, Request, Status};
 
 const DEFAULT_BUCKETS_MS: &[f64] = &[
     10e-3, 100e-3, 200e-3, 400e-3, 600e-3, 800e-3, 1.0, 2.0, 5.0, 10.0, 100.0, 1e3,
@@ -100,8 +100,37 @@ async fn register_worker(
     id: WorkerId,
     advertise_addr: SocketAddr,
     manager_addr: SocketAddr,
-) -> anyhow::Result<()> {
-    let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+) -> Result<(), tonic::Status> {
+    const MAX_ATTEMPTS: usize = 6;
+    const RETRY_DELAY: Duration = Duration::from_secs(10);
+    for _ in 0..MAX_ATTEMPTS {
+        match try_register_worker(id, advertise_addr, manager_addr).await {
+            Ok(_) => {
+                println!("Worker registered successfully.");
+                return Ok(());
+            }
+            Err(e) if e.code() == Code::Unavailable => {
+                println!(
+                    "Manager unavailable, retrying in {} seconds.",
+                    RETRY_DELAY.as_secs()
+                );
+                time::sleep(RETRY_DELAY).await;
+            }
+            e => return e,
+        }
+    }
+    println!("Failed to register worker after {} attempts.", MAX_ATTEMPTS);
+    Err(Status::unavailable("Manager unavailable"))
+}
+
+async fn try_register_worker(
+    id: WorkerId,
+    advertise_addr: SocketAddr,
+    manager_addr: SocketAddr,
+) -> Result<(), tonic::Status> {
+    let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr))
+        .await
+        .map_err(|e| Status::from_error(Box::new(e)))?;
     let address = WorkerAddress {
         ip_address: advertise_addr.ip().to_string(),
         port: advertise_addr.port() as u32,
