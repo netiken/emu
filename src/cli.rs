@@ -88,7 +88,7 @@ impl Command {
     }
 }
 
-async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> anyhow::Result<()> {
+pub async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
     let spec: RunSpecification = spec.into();
     let request = Request::new(spec);
