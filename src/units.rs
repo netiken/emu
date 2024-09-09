@@ -92,6 +92,10 @@ impl From<Mbps> for BitsPerSec {
         Eq,
         Hash,
         FromStr,
+        PartialOrd,
+        Ord,
+        PartialEq,
+        Eq,
         Serialize,
         Deserialize
     )
