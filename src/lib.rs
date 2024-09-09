@@ -1,6 +1,7 @@
 use distribution::EcdfError;
 pub use manager::Manager;
 use std::net::AddrParseError;
+pub use units::Dscp;
 pub use worker::{Worker, WorkerId};
 pub use workload::*;
 
