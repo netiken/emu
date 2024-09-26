@@ -68,6 +68,10 @@ impl EmuWorker for Worker {
         Ok(Response::new(()))
     }
 
+    async fn check(&self, _: Request<()>) -> Result<Response<()>, Status> {
+        Ok(Response::new(()))
+    }
+
     async fn run(
         &self,
         request: Request<proto::RunSpecification>,

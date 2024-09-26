@@ -7,6 +7,8 @@ import "google/protobuf/wrappers.proto";
 service EmuManager {
     rpc RegisterWorker(WorkerRegistration) returns (google.protobuf.Empty);
 
+    rpc Check(google.protobuf.Empty) returns (CheckResponse);
+
     rpc Run(RunSpecification) returns (google.protobuf.Empty);
 }
 
@@ -18,6 +20,10 @@ message WorkerRegistration {
 message WorkerAddress {
     string ip_address = 1;
     uint32 port = 2;
+}
+
+message CheckResponse {
+    google.protobuf.UInt32Value nr_workers = 1;
 }
 
 message RunSpecification {
@@ -63,6 +69,8 @@ message GenericRequestResponse {
 
 service EmuWorker {
     rpc IntroducePeers(WorkerAddressMap) returns (google.protobuf.Empty);
+
+    rpc Check(google.protobuf.Empty) returns (google.protobuf.Empty);
 
     rpc Run(RunSpecification) returns (google.protobuf.Empty);
 

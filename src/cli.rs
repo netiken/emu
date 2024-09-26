@@ -38,6 +38,10 @@ pub enum Command {
         #[arg(long, default_value = "0.0.0.0:9000")]
         metrics_addr: SocketAddr,
     },
+    Check {
+        #[arg(short, long)]
+        manager_addr: SocketAddr,
+    },
     Run {
         #[arg(short, long)]
         spec: PathBuf,
@@ -78,6 +82,10 @@ impl Command {
                 register_worker(id, advertise_addr, manager_addr).await?;
                 handle.await??;
             }
+            Command::Check { manager_addr } => {
+                let nr_workers = check(manager_addr).await?;
+                println!("Manager is up, and {} workers are up.", nr_workers);
+            }
             Command::Run { spec, manager_addr } => {
                 let spec = fs::read_to_string(spec)?;
                 let spec: crate::RunSpecification = serde_json::from_str(&spec)?;
@@ -86,6 +94,13 @@ impl Command {
         }
         Ok(())
     }
+}
+
+pub async fn check(manager_addr: SocketAddr) -> anyhow::Result<usize> {
+    let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+    let request = Request::new(());
+    let response = client.check(request).await?;
+    Ok(response.get_ref().nr_workers.unwrap() as usize)
 }
 
 pub async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> anyhow::Result<()> {

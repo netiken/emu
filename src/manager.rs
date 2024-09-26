@@ -31,6 +31,19 @@ impl EmuManager for Manager {
         Ok(Response::new(()))
     }
 
+    async fn check(&self, _: Request<()>) -> Result<Response<proto::CheckResponse>, Status> {
+        let mut n = 0;
+        for entry in self.wid2client.iter() {
+            let mut client = entry.value().clone();
+            if client.check(()).await.is_ok() {
+                n += 1;
+            }
+        }
+        Ok(Response::new(proto::CheckResponse {
+            nr_workers: Some(n),
+        }))
+    }
+
     async fn run(&self, request: Request<proto::RunSpecification>) -> Result<Response<()>, Status> {
         let spec = RunSpecification::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
