@@ -145,7 +145,6 @@ impl EmuWorker for Worker {
 // Runs a point-to-point workload in open-loop.
 async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
     let client = ctx.connect().await?;
-    let mut handles = Vec::new();
     let mut rng = StdRng::from_entropy();
     let deltas = ctx
         .delta_distribution()
@@ -167,7 +166,7 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
         // Start the next RPC.
         let mut client = client.clone();
         let histogram = ctx.histogram.clone();
-        let handle = task::spawn(async move {
+        task::spawn(async move {
             let now = Instant::now();
             let _ = client
                 .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
@@ -175,11 +174,7 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
             let latency = now.elapsed();
             histogram.record((latency.as_nanos() as f64).round() / 1e6)
         });
-        handles.push(handle);
         now = Instant::now();
-    }
-    for handle in handles {
-        handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
     }
     Ok(())
 }
