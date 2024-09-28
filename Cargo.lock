@@ -116,6 +116,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-timer"
+version = "1.0.0-beta.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ff4ca74f619ff7e4eb279686a814665fc910cd2fca2bb943491b9bc40e80c8b"
+dependencies = [
+ "error-code",
+ "libc",
+ "tokio",
+ "wasm-bindgen",
+ "web-time",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,6 +477,7 @@ name = "emu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-timer",
  "clap",
  "dashmap",
  "derivative",
@@ -507,6 +521,12 @@ dependencies = [
  "libc",
  "windows-sys",
 ]
+
+[[package]]
+name = "error-code"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d9305ccc6942a704f4335694ecd3de2ea531b114ac2d51f5f843750787a92f"
 
 [[package]]
 name = "fastrand"
@@ -2024,6 +2044,16 @@ name = "web-sys"
 version = "0.3.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26fdeaafd9bd129f65e7c031593c24d62186301e0c72c8978fa1678be7d532c0"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

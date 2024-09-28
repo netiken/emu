@@ -1,10 +1,12 @@
+#![allow(non_snake_case)]
+
 use dashmap::DashMap;
 use derivative::Derivative;
 use metrics::Histogram;
 use rand::prelude::*;
 use tokio::{
     task,
-    time::{self, Duration, Instant},
+    time::{Duration, Instant},
 };
 use tonic::{
     transport::{Channel, Endpoint},
@@ -149,34 +151,35 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
         .delta_distribution()
         .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
     let duration = Duration::from_secs(ctx.duration.into_inner() as u64);
-    let now = Instant::now();
-    let mut cur = now;
-    while cur - now < duration {
-        // Generate the next RPC time.
-        let delta = deltas.gen(&mut rng).round() as u64;
-        cur += Duration::from_nanos(delta);
+    let mut now = Instant::now();
+    let end = now + duration;
+    while now < end {
         // Generate the next RPC request payload.
         let size = ctx.sizes.sample(&mut rng).round() as usize;
         let mut data = vec![0; size];
         rng.fill(&mut data[..]);
-        // Schedule the next RPC request.
+
+        // Wait until the next RPC time.
+        let delta = deltas.gen(&mut rng).round() as u64;
+        let timer = async_timer::new_timer(Duration::from_nanos(delta));
+        timer.await;
+
+        // Start the next RPC.
         let mut client = client.clone();
+        let histogram = ctx.histogram.clone();
         let handle = task::spawn(async move {
-            let mut interval = time::interval(cur - now);
-            interval.tick().await; // ticks immediately
-            interval.tick().await; // ticks after `cur - now`
             let now = Instant::now();
             let _ = client
                 .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
                 .await;
-            now.elapsed()
+            let latency = now.elapsed();
+            histogram.record((latency.as_nanos() as f64).round() / 1e6)
         });
         handles.push(handle);
+        now = Instant::now();
     }
     for handle in handles {
-        let latency = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
-        ctx.histogram
-            .record((latency.as_nanos() as f64).round() / 1e6);
+        handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
     }
     Ok(())
 }
