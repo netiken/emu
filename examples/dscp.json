@@ -4,7 +4,7 @@
       "src": 0,
       "dst": 2,
       "dscp": 10,
-      "rate": 100,
+      "rate": 250,
       "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
@@ -17,7 +17,7 @@
       "src": 1,
       "dst": 2,
       "dscp": 18,
-      "rate": 100,
+      "rate": 250,
       "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
@@ -31,10 +31,10 @@
     "sizes": {
       "ecdf": [
         [0.0, 0.0],
-        [10000.0, 25.0],
-        [100000.0, 50.0],
-        [1000000.0, 75.0],
-        [10000000.0, 100.0]
+        [1000.0, 25.0],
+        [10000.0, 50.0],
+        [100000.0, 75.0],
+        [1000000.0, 100.0]
       ]
     }
   }
