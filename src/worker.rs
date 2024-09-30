@@ -22,6 +22,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
+    mem::MaybeUninit,
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
@@ -155,8 +156,7 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
     while now < end {
         // Generate the next RPC request payload.
         let size = ctx.sizes.sample(&mut rng).round() as usize;
-        let mut data = vec![0; size];
-        rng.fill(&mut data[..]);
+        let data = mk_uninit_bytes(size);
 
         // Wait until the next RPC time.
         let delta = deltas.gen(&mut rng).round() as u64;
@@ -177,6 +177,14 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
         now = Instant::now();
     }
     Ok(())
+}
+
+fn mk_uninit_bytes(size: usize) -> Vec<u8> {
+    let mut vec = Vec::<MaybeUninit<u8>>::with_capacity(size);
+    unsafe {
+        vec.set_len(size);
+        std::mem::transmute::<Vec<MaybeUninit<u8>>, Vec<u8>>(vec)
+    }
 }
 
 #[derive(Clone, Derivative)]
