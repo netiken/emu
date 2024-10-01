@@ -116,7 +116,7 @@ impl EmuWorker for Worker {
                 dst: workload.dst,
                 dst_addr: address,
                 dscp: workload.dscp,
-                rate: workload.rate,
+                target_rate: workload.target_rate,
                 sizes: Arc::clone(sizes),
                 deltas: workload.delta_distribution_shape,
                 duration: workload.duration,
@@ -194,7 +194,7 @@ struct P2PContext {
     dst: WorkerId,
     dst_addr: WorkerAddress,
     dscp: Dscp,
-    rate: Mbps,
+    target_rate: Mbps,
     sizes: Arc<Ecdf>,
     deltas: DistShape,
     duration: Secs,
@@ -205,7 +205,7 @@ struct P2PContext {
 impl P2PContext {
     fn delta_distribution(&self) -> anyhow::Result<Box<dyn GenF64 + Send>> {
         let mean_size = Bytes::new(self.sizes.mean().round() as u64);
-        let mean_delta = mean_delta_for_rate(self.rate, mean_size);
+        let mean_delta = mean_delta_for_rate(self.target_rate, mean_size);
         self.deltas.to_kind(mean_delta.into_inner() as f64).to_gen()
     }
 

@@ -48,7 +48,7 @@ message P2PWorkload {
     google.protobuf.UInt32Value src = 1;
     google.protobuf.UInt32Value dst = 2;
     google.protobuf.UInt32Value dscp = 3;
-    uint32 rate_mbps = 4;
+    uint32 target_rate_mbps = 4;
     string size_distribution_name = 5;
     DistShape delta_distribution_shape = 6;
     uint32 duration_secs = 7;

@@ -82,7 +82,7 @@ pub struct P2PWorkload {
     pub src: WorkerId,
     pub dst: WorkerId,
     pub dscp: Dscp,
-    pub rate: Mbps,
+    pub target_rate: Mbps,
     pub size_distribution_name: String,
     pub delta_distribution_shape: DistShape,
     pub duration: Secs,
@@ -98,7 +98,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
         let dst = WorkerId::new(dst);
         let dscp = proto.dscp.ok_or(Error::MissingField("dscp"))?;
         let dscp = Dscp::try_new(dscp).map_err(|_| Error::InvalidDscp(dscp))?;
-        let rate = Mbps::new(proto.rate_mbps);
+        let rate = Mbps::new(proto.target_rate_mbps);
         let size_distribution_name = proto.size_distribution_name;
         let delta_distribution_shape = proto
             .delta_distribution_shape
@@ -116,7 +116,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
             src,
             dst,
             dscp,
-            rate,
+            target_rate: rate,
             size_distribution_name,
             delta_distribution_shape,
             duration,
@@ -130,7 +130,7 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             src: Some(value.src.into_inner()),
             dst: Some(value.dst.into_inner()),
             dscp: Some(value.dscp.into_inner()),
-            rate_mbps: value.rate.into_inner(),
+            target_rate_mbps: value.target_rate.into_inner(),
             size_distribution_name: value.size_distribution_name,
             delta_distribution_shape: Some(proto::DistShape {
                 shape: match value.delta_distribution_shape {
