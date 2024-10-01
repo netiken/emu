@@ -168,11 +168,12 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
         let histogram = ctx.histogram.clone();
         task::spawn(async move {
             let now = Instant::now();
-            let _ = client
+            client
                 .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
-                .await;
+                .await?;
             let latency = now.elapsed();
-            histogram.record((latency.as_nanos() as f64).round() / 1e6)
+            histogram.record((latency.as_nanos() as f64).round() / 1e6);
+            Result::<_, Status>::Ok(())
         });
         now = Instant::now();
     }
