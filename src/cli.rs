@@ -16,7 +16,7 @@ use tokio::{
 use tonic::{transport::Server, Code, Request, Status};
 
 const DEFAULT_BUCKETS_MS: &[f64] = &[
-    1.0, 2.0, 4.0, 6.0, 8.0, 1.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0,
+    1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0,
 ];
 
 #[derive(Debug, Clone, Subcommand)]
