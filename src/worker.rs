@@ -170,10 +170,10 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
             let now = Instant::now();
             client
                 .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
-                .await?;
+                .await
+                .expect("Failed to send RPC");
             let latency = now.elapsed();
             histogram.record((latency.as_nanos() as f64).round() / 1e6);
-            Result::<_, Status>::Ok(())
         });
         now = Instant::now();
     }
