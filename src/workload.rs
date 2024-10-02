@@ -10,7 +10,7 @@ use crate::{
 };
 
 // gRPC limits the maximum messages size to 4MB.
-pub const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
+pub const SZ_GRPC_MAX: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RunSpecification {
@@ -34,7 +34,7 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
                 let &proto::CdfPoint { x: max, .. } =
                     v.points.last().ok_or(Error::Ecdf(EcdfError::NoValues))?;
                 let max = max.ceil() as usize;
-                if max >= MAX_MESSAGE_SIZE {
+                if max >= SZ_GRPC_MAX {
                     return Err(Error::MaxMessageSize(max));
                 }
                 Result::<_, Self::Error>::Ok((k, Arc::new(Ecdf::try_from(v)?)))
