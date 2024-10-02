@@ -29,6 +29,9 @@ pub enum Error {
     #[error("invalid DSCP value {0}")]
     InvalidDscp(u32),
 
+    #[error("max message size is 4MB, got {0} bytes")]
+    MaxMessageSize(usize),
+
     #[error("eCDF error: {0}")]
     Ecdf(#[from] EcdfError),
 }

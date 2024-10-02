@@ -9,6 +9,9 @@ use crate::{
     Error, WorkerId,
 };
 
+// gRPC limits the maximum messages size to 4MB.
+pub const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RunSpecification {
     pub p2p_workloads: Vec<P2PWorkload>,
@@ -27,7 +30,15 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
         let size_distributions = proto
             .size_distributions
             .into_iter()
-            .map(|(k, v)| Result::<_, Self::Error>::Ok((k, Arc::new(Ecdf::try_from(v)?))))
+            .map(|(k, v)| {
+                let &proto::CdfPoint { x: max, .. } =
+                    v.points.last().ok_or(Error::Ecdf(EcdfError::NoValues))?;
+                let max = max.ceil() as usize;
+                if max >= MAX_MESSAGE_SIZE {
+                    return Err(Error::MaxMessageSize(max));
+                }
+                Result::<_, Self::Error>::Ok((k, Arc::new(Ecdf::try_from(v)?)))
+            })
             .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(Self {
             p2p_workloads,
