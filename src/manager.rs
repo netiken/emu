@@ -51,6 +51,11 @@ impl EmuManager for Manager {
         self.run_workers(spec).await?;
         Ok(Response::new(()))
     }
+
+    async fn stop(&self, _: Request<()>) -> Result<Response<()>, Status> {
+        self.stop_workers().await?;
+        Ok(Response::new(()))
+    }
 }
 
 impl Manager {
@@ -97,6 +102,27 @@ impl Manager {
             let handle = task::spawn(async move {
                 client
                     .run(Request::new(spec.into()))
+                    .await
+                    .map_err(|e| Status::from_error(Box::new(e)))?;
+                Result::<_, Status>::Ok(())
+            });
+            handles.push(handle);
+        }
+        for handle in handles {
+            handle
+                .await
+                .map_err(|e| Status::from_error(Box::new(e)))??;
+        }
+        Ok(())
+    }
+
+    async fn stop_workers(&self) -> Result<(), Status> {
+        let mut handles = Vec::new();
+        for entry in self.wid2client.iter() {
+            let mut client = entry.value().clone();
+            let handle = task::spawn(async move {
+                client
+                    .stop(Request::new(()))
                     .await
                     .map_err(|e| Status::from_error(Box::new(e)))?;
                 Result::<_, Status>::Ok(())

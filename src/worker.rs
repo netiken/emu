@@ -24,7 +24,10 @@ use std::{
     collections::HashMap,
     mem::MaybeUninit,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 #[nutype::nutype(derive(
@@ -45,6 +48,7 @@ pub struct WorkerId(u32);
 pub struct Worker {
     id: WorkerId,
     wid2addr: DashMap<WorkerId, WorkerAddress>,
+    is_stopped: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -52,6 +56,7 @@ impl Worker {
         Self {
             id,
             wid2addr: DashMap::new(),
+            is_stopped: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -75,10 +80,16 @@ impl EmuWorker for Worker {
         Ok(Response::new(()))
     }
 
+    async fn stop(&self, _: Request<()>) -> Result<Response<()>, Status> {
+        self.is_stopped.store(true, Ordering::Relaxed);
+        Ok(Response::new(()))
+    }
+
     async fn run(
         &self,
         request: Request<proto::RunSpecification>,
     ) -> Result<Response<()>, tonic::Status> {
+        self.is_stopped.store(false, Ordering::Relaxed);
         let spec = RunSpecification::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
         let mut handles = Vec::new();
@@ -121,6 +132,7 @@ impl EmuWorker for Worker {
                 deltas: workload.delta_distribution_shape,
                 duration: workload.duration,
                 histogram: histogram.clone(),
+                should_stop: Arc::clone(&self.is_stopped),
             };
             // Initiate the point-to-point workload.
             let handle = task::spawn(run_p2p_workload(ctx));
@@ -153,7 +165,7 @@ async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
     let duration = Duration::from_secs(ctx.duration.into_inner() as u64);
     let mut now = Instant::now();
     let end = now + duration;
-    while now < end {
+    while now < end && !ctx.should_stop() {
         // Generate the next RPC request payload.
         let size = ctx.sizes.sample(&mut rng).round() as usize;
         let data = mk_uninit_bytes(size);
@@ -201,6 +213,7 @@ struct P2PContext {
     duration: Secs,
     #[derivative(Debug = "ignore")]
     histogram: Histogram,
+    should_stop: Arc<AtomicBool>,
 }
 
 impl P2PContext {
@@ -222,6 +235,11 @@ impl P2PContext {
             .await
             .map_err(|e| Status::from_error(Box::new(e)))?;
         Ok(EmuWorkerClient::new(channel))
+    }
+
+    #[inline]
+    fn should_stop(&self) -> bool {
+        self.should_stop.load(Ordering::Relaxed)
     }
 }
 

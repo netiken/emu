@@ -10,6 +10,8 @@ service EmuManager {
     rpc Check(google.protobuf.Empty) returns (CheckResponse);
 
     rpc Run(RunSpecification) returns (google.protobuf.Empty);
+
+    rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
 }
 
 message WorkerRegistration {
@@ -73,6 +75,8 @@ service EmuWorker {
     rpc Check(google.protobuf.Empty) returns (google.protobuf.Empty);
 
     rpc Run(RunSpecification) returns (google.protobuf.Empty);
+
+    rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
 
     rpc GenericRpc(GenericRequestResponse) returns (GenericRequestResponse);
 }

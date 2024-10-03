@@ -1,4 +1,4 @@
-use std::{fs, net::SocketAddr, path::PathBuf};
+use std::{fs, net::SocketAddr, path::PathBuf, process};
 
 use crate::{
     proto::{
@@ -10,7 +10,7 @@ use crate::{
 use clap::Subcommand;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::{
-    task,
+    signal, task,
     time::{self, Duration},
 };
 use tonic::{transport::Server, Code, Request, Status};
@@ -98,13 +98,22 @@ impl Command {
 
 pub async fn check(manager_addr: SocketAddr) -> anyhow::Result<usize> {
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
-    let request = Request::new(());
-    let response = client.check(request).await?;
+    let response = client.check(Request::new(())).await?;
     Ok(response.get_ref().nr_workers.unwrap() as usize)
 }
 
 pub async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+    let mut client_ = client.clone();
+    task::spawn(async move {
+        signal::ctrl_c().await.expect("Failed to listen for Ctrl-C");
+        println!("Ctrl-C received, aborting...");
+        client_
+            .stop(Request::new(()))
+            .await
+            .expect("Failed to stop worker");
+        process::abort();
+    });
     let spec: RunSpecification = spec.into();
     let request = Request::new(spec);
     let _response = client.run(request).await?;
