@@ -30,7 +30,7 @@ message CheckResponse {
 
 message RunSpecification {
     repeated P2PWorkload p2p_workloads = 1;
-    map<string, Ecdf> size_distributions = 2;
+    Ecdf size_distribution = 2;
 }
 
 message ExponentialShape {}
@@ -50,12 +50,11 @@ message P2PWorkload {
     google.protobuf.UInt32Value src = 1;
     google.protobuf.UInt32Value dst = 2;
     google.protobuf.UInt32Value dscp = 3;
-    string size_distribution_name = 4;
-    DistShape delta_distribution_shape = 5;
-    uint32 target_rate_mbps = 6;
-    uint32 duration_secs = 7;
-    uint32 probe_rate_mbps = 8;
-    uint32 probe_duration_secs = 9;
+    DistShape delta_distribution_shape = 4;
+    uint32 target_rate_mbps = 5;
+    uint32 duration_secs = 6;
+    uint32 probe_rate_mbps = 7;
+    uint32 probe_duration_secs = 8;
 }
 
 message Ecdf {

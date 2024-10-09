@@ -4,7 +4,6 @@
       "src": 0,
       "dst": 2,
       "dscp": 10,
-      "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
           "sigma": 2.0
@@ -19,7 +18,6 @@
       "src": 1,
       "dst": 2,
       "dscp": 18,
-      "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
           "sigma": 2.0
@@ -31,15 +29,13 @@
       "probe_duration": 10
     }
   ],
-  "size_distributions": {
-    "sizes": {
-      "ecdf": [
-        [0.0, 0.0],
-        [1000.0, 25.0],
-        [10000.0, 50.0],
-        [100000.0, 75.0],
-        [1000000.0, 100.0]
-      ]
-    }
+  "size_distribution": {
+    "ecdf": [
+      [0.0, 0.0],
+      [1000.0, 25.0],
+      [10000.0, 50.0],
+      [100000.0, 75.0],
+      [1000000.0, 100.0]
+    ]
   }
 }

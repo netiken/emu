@@ -110,15 +110,6 @@ impl EmuWorker for Worker {
                 })?
                 .value()
                 .to_owned();
-            let sizes = spec
-                .size_distributions
-                .get(&workload.size_distribution_name)
-                .ok_or_else(|| {
-                    Status::not_found(format!(
-                        "Size distribution {} not found",
-                        workload.size_distribution_name
-                    ))
-                })?;
             let histogram = histograms.entry(workload.dscp).or_insert_with(
                 || metrics::histogram!("slowdown", "dscp" => workload.dscp.to_string()),
             );
@@ -126,7 +117,7 @@ impl EmuWorker for Worker {
                 src: self.id,
                 dst: workload.dst,
                 client: connect(address, workload.dscp).await?,
-                sizes: Arc::clone(sizes),
+                sizes: Arc::clone(&spec.size_distribution),
                 deltas: workload.delta_distribution_shape,
                 target_rate: workload.target_rate,
                 duration: workload.duration,
