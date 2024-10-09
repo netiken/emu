@@ -14,7 +14,7 @@ use tonic::{
 };
 
 use crate::{
-    distribution::{DistShape, Ecdf, GenF64},
+    distribution::{DistShape, Ecdf, GenF64, SampleWithBucket},
     proto::{self, emu_worker_client::EmuWorkerClient, emu_worker_server::EmuWorker},
     units::{BitsPerSec, Bytes, Dscp, Mbps, Nanosecs, Secs},
     util::http::HttpConnector,
@@ -120,22 +120,23 @@ impl EmuWorker for Worker {
                     ))
                 })?;
             let histogram = histograms.entry(workload.dscp).or_insert_with(
-                || metrics::histogram!("latency_ms", "dscp" => workload.dscp.to_string()),
+                || metrics::histogram!("slowdown", "dscp" => workload.dscp.to_string()),
             );
             let ctx = P2PContext {
                 src: self.id,
                 dst: workload.dst,
-                dst_addr: address,
-                dscp: workload.dscp,
-                target_rate: workload.target_rate,
+                client: connect(address, workload.dscp).await?,
                 sizes: Arc::clone(sizes),
                 deltas: workload.delta_distribution_shape,
+                target_rate: workload.target_rate,
                 duration: workload.duration,
+                probe_rate: workload.probe_rate,
+                probe_duration: workload.probe_duration,
                 histogram: histogram.clone(),
                 should_stop: Arc::clone(&self.is_stopped),
             };
             // Initiate the point-to-point workload.
-            let handle = task::spawn(run_p2p_workload(ctx));
+            let handle = task::spawn(run_p2p(ctx));
             handles.push(handle)
         }
         for handle in handles {
@@ -156,40 +157,10 @@ impl EmuWorker for Worker {
 }
 
 // Runs a point-to-point workload in open-loop.
-async fn run_p2p_workload(ctx: P2PContext) -> Result<(), Status> {
-    let client = ctx.connect().await?;
+async fn run_p2p(ctx: P2PContext) -> Result<(), Status> {
     let mut rng = StdRng::from_entropy();
-    let deltas = ctx
-        .delta_distribution()
-        .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
-    let duration = Duration::from_secs(ctx.duration.into_inner() as u64);
-    let mut now = Instant::now();
-    let end = now + duration;
-    while now < end && !ctx.should_stop() {
-        // Generate the next RPC request payload.
-        let size = ctx.sizes.sample(&mut rng).round() as usize;
-        let data = mk_uninit_bytes(size);
-
-        // Wait until the next RPC time.
-        let delta = deltas.gen(&mut rng).round() as u64;
-        let timer = async_timer::new_timer(Duration::from_nanos(delta));
-        timer.await;
-
-        // Start the next RPC.
-        let mut client = client.clone();
-        let histogram = ctx.histogram.clone();
-        task::spawn(async move {
-            let now = Instant::now();
-            client
-                .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
-                .await
-                .expect("Failed to send RPC");
-            let latency = now.elapsed();
-            histogram.record((latency.as_nanos() as f64).round() / 1e6);
-        });
-        now = Instant::now();
-    }
-    Ok(())
+    let bucket2min = ctx.probe(&mut rng).await?;
+    ctx.work(&mut rng, &bucket2min).await
 }
 
 fn mk_uninit_bytes(size: usize) -> Vec<u8> {
@@ -205,42 +176,141 @@ fn mk_uninit_bytes(size: usize) -> Vec<u8> {
 struct P2PContext {
     src: WorkerId,
     dst: WorkerId,
-    dst_addr: WorkerAddress,
-    dscp: Dscp,
-    target_rate: Mbps,
+    client: EmuWorkerClient<Channel>,
     sizes: Arc<Ecdf>,
     deltas: DistShape,
+    target_rate: Mbps,
     duration: Secs,
+    probe_rate: Mbps,
+    probe_duration: Secs,
     #[derivative(Debug = "ignore")]
     histogram: Histogram,
     should_stop: Arc<AtomicBool>,
 }
 
 impl P2PContext {
-    fn delta_distribution(&self) -> anyhow::Result<Box<dyn GenF64 + Send>> {
+    async fn probe(&self, rng: &mut StdRng) -> Result<HashMap<usize, Duration>, Status> {
+        let mut handles = Vec::new();
+        let deltas = self
+            .probe_delta_distribution()
+            .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
+        let duration = Duration::from_secs(self.probe_duration.into_inner() as u64);
+        let mut now = Instant::now();
+        let end = now + duration;
+        while now < end && !self.should_stop() {
+            // Generate the next RPC request payload.
+            let SampleWithBucket {
+                bucket,
+                sample: size,
+            } = Distribution::<SampleWithBucket>::sample(&*self.sizes, rng);
+            let data = mk_uninit_bytes(size as usize);
+
+            // Wait until the next RPC time.
+            let delta = deltas.gen(rng).round() as u64;
+            let timer = async_timer::new_timer(Duration::from_nanos(delta));
+            timer.await;
+
+            // Start the next RPC.
+            let mut client = self.client.clone();
+            handles.push(task::spawn(async move {
+                let now = Instant::now();
+                client
+                    .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
+                    .await
+                    .expect("Failed to send RPC");
+                (bucket, now.elapsed())
+            }));
+            now = Instant::now();
+        }
+        let mut bucket2min = HashMap::new();
+        for handle in handles {
+            let (bucket, elapsed) = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
+            let min = bucket2min.entry(bucket).or_insert(elapsed);
+            *min = std::cmp::min(*min, elapsed);
+        }
+        Ok(bucket2min)
+    }
+
+    async fn work(
+        &self,
+        rng: &mut StdRng,
+        bucket2min: &HashMap<usize, Duration>,
+    ) -> Result<(), Status> {
+        let deltas = self
+            .target_delta_distribution()
+            .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
+        let duration = Duration::from_secs(self.duration.into_inner() as u64);
+        let mut now = Instant::now();
+        let end = now + duration;
+        while now < end && !self.should_stop() {
+            // Generate the next RPC request payload.
+            let SampleWithBucket {
+                bucket,
+                sample: size,
+            } = Distribution::<SampleWithBucket>::sample(&*self.sizes, rng);
+            let data = mk_uninit_bytes(size as usize);
+            let min_latency = *bucket2min.get(&bucket).ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "Unable to find min latency for bucket {bucket}. Use a longer probe duration."
+                ))
+            })?;
+
+            // Wait until the next RPC time.
+            let delta = deltas.gen(rng).round() as u64;
+            let timer = async_timer::new_timer(Duration::from_nanos(delta));
+            timer.await;
+
+            // Start the next RPC.
+            let mut client = self.client.clone();
+            let histogram = self.histogram.clone();
+            task::spawn(async move {
+                let now = Instant::now();
+                client
+                    .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
+                    .await
+                    .expect("Failed to send RPC");
+                let latency = now.elapsed();
+                let slowdown = latency.as_nanos() as f64 / min_latency.as_nanos() as f64;
+                eprintln!("bucket = {bucket}, slowdown = {slowdown}");
+                histogram.record(slowdown);
+            });
+            now = Instant::now();
+        }
+        Ok(())
+    }
+
+    fn target_delta_distribution(&self) -> anyhow::Result<Box<dyn GenF64 + Send>> {
         let mean_size = Bytes::new(self.sizes.mean().round() as u64);
         let mean_delta = mean_delta_for_rate(self.target_rate, mean_size);
         self.deltas.to_kind(mean_delta.into_inner() as f64).to_gen()
     }
 
-    async fn connect(&self) -> Result<EmuWorkerClient<Channel>, Status> {
-        let addr = self.dst_addr.socket_addr();
-        let endpoint = format!("http://{}", addr);
-        let tos = self.dscp.into_inner() << 2;
-        let mut connector = HttpConnector::new();
-        connector.set_tos(Some(tos));
-        let channel = Endpoint::try_from(endpoint)
-            .map_err(|e| Status::from_error(Box::new(e)))?
-            .connect_with_connector(connector)
-            .await
-            .map_err(|e| Status::from_error(Box::new(e)))?;
-        Ok(EmuWorkerClient::new(channel))
+    fn probe_delta_distribution(&self) -> anyhow::Result<Box<dyn GenF64 + Send>> {
+        let mean_size = Bytes::new(self.sizes.mean().round() as u64);
+        let mean_delta = mean_delta_for_rate(self.probe_rate, mean_size);
+        DistShape::Constant
+            .to_kind(mean_delta.into_inner() as f64)
+            .to_gen()
     }
 
     #[inline]
     fn should_stop(&self) -> bool {
         self.should_stop.load(Ordering::Relaxed)
     }
+}
+
+async fn connect(addr: WorkerAddress, dscp: Dscp) -> Result<EmuWorkerClient<Channel>, Status> {
+    let addr = addr.socket_addr();
+    let endpoint = format!("http://{}", addr);
+    let tos = dscp.into_inner() << 2;
+    let mut connector = HttpConnector::new();
+    connector.set_tos(Some(tos));
+    let channel = Endpoint::try_from(endpoint)
+        .map_err(|e| Status::from_error(Box::new(e)))?
+        .connect_with_connector(connector)
+        .await
+        .map_err(|e| Status::from_error(Box::new(e)))?;
+    Ok(EmuWorkerClient::new(channel))
 }
 
 fn mean_delta_for_rate(rate: impl Into<BitsPerSec>, mean_size: impl Into<Bytes>) -> Nanosecs {

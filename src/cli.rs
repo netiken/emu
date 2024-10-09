@@ -15,8 +15,9 @@ use tokio::{
 };
 use tonic::{transport::Server, Code, Request, Status};
 
-const DEFAULT_BUCKETS_MS: &[f64] = &[
-    1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0,
+const DEFAULT_BUCKETS: &[f64] = &[
+    1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0,
+    80.0, 90.0, 100.0,
 ];
 
 #[derive(Debug, Clone, Subcommand)]
@@ -68,7 +69,7 @@ impl Command {
                 manager_addr,
                 metrics_addr,
             } => {
-                init_metrics(metrics_addr, DEFAULT_BUCKETS_MS)?;
+                init_metrics(metrics_addr, DEFAULT_BUCKETS)?;
                 let handle = task::spawn(async move {
                     let worker = Worker::new(id);
                     let addr = format!("0.0.0.0:{}", advertise_addr.port()).parse()?;

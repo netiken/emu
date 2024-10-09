@@ -4,14 +4,16 @@
       "src": 0,
       "dst": 1,
       "dscp": 10,
-      "target_rate": 2000,
       "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
           "sigma": 2.0
         }
       },
-      "duration": 30
+      "target_rate": 2000,
+      "duration": 120,
+      "probe_rate": 100,
+      "probe_duration": 30
     }
   ],
   "size_distributions": {

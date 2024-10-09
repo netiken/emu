@@ -50,10 +50,12 @@ message P2PWorkload {
     google.protobuf.UInt32Value src = 1;
     google.protobuf.UInt32Value dst = 2;
     google.protobuf.UInt32Value dscp = 3;
-    uint32 target_rate_mbps = 4;
-    string size_distribution_name = 5;
-    DistShape delta_distribution_shape = 6;
+    string size_distribution_name = 4;
+    DistShape delta_distribution_shape = 5;
+    uint32 target_rate_mbps = 6;
     uint32 duration_secs = 7;
+    uint32 probe_rate_mbps = 8;
+    uint32 probe_duration_secs = 9;
 }
 
 message Ecdf {

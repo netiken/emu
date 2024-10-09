@@ -4,27 +4,31 @@
       "src": 0,
       "dst": 2,
       "dscp": 10,
-      "target_rate": 250,
       "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
           "sigma": 2.0
         }
       },
-      "duration": 120
+      "target_rate": 250,
+      "duration": 120,
+      "probe_rate": 100,
+      "probe_duration": 10
     },
     {
       "src": 1,
       "dst": 2,
       "dscp": 18,
-      "target_rate": 250,
       "size_distribution_name": "sizes",
       "delta_distribution_shape": {
         "LogNormal": {
           "sigma": 2.0
         }
       },
-      "duration": 120
+      "target_rate": 250,
+      "duration": 120,
+      "probe_rate": 100,
+      "probe_duration": 10
     }
   ],
   "size_distributions": {

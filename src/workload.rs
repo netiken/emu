@@ -93,10 +93,12 @@ pub struct P2PWorkload {
     pub src: WorkerId,
     pub dst: WorkerId,
     pub dscp: Dscp,
-    pub target_rate: Mbps,
     pub size_distribution_name: String,
     pub delta_distribution_shape: DistShape,
+    pub target_rate: Mbps,
     pub duration: Secs,
+    pub probe_rate: Mbps,
+    pub probe_duration: Secs,
 }
 
 impl TryFrom<proto::P2pWorkload> for P2PWorkload {
@@ -109,7 +111,6 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
         let dst = WorkerId::new(dst);
         let dscp = proto.dscp.ok_or(Error::MissingField("dscp"))?;
         let dscp = Dscp::try_new(dscp).map_err(|_| Error::InvalidDscp(dscp))?;
-        let rate = Mbps::new(proto.target_rate_mbps);
         let size_distribution_name = proto.size_distribution_name;
         let delta_distribution_shape = proto
             .delta_distribution_shape
@@ -122,15 +123,20 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
                 DistShape::LogNormal { sigma: shape.sigma }
             }
         };
+        let target_rate = Mbps::new(proto.target_rate_mbps);
         let duration = Secs::new(proto.duration_secs);
+        let probe_rate = Mbps::new(proto.probe_rate_mbps);
+        let probe_duration = Secs::new(proto.probe_duration_secs);
         Ok(Self {
             src,
             dst,
             dscp,
-            target_rate: rate,
             size_distribution_name,
             delta_distribution_shape,
+            target_rate,
             duration,
+            probe_rate,
+            probe_duration,
         })
     }
 }
@@ -141,7 +147,6 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             src: Some(value.src.into_inner()),
             dst: Some(value.dst.into_inner()),
             dscp: Some(value.dscp.into_inner()),
-            target_rate_mbps: value.target_rate.into_inner(),
             size_distribution_name: value.size_distribution_name,
             delta_distribution_shape: Some(proto::DistShape {
                 shape: match value.delta_distribution_shape {
@@ -156,7 +161,10 @@ impl From<P2PWorkload> for proto::P2pWorkload {
                     _ => unimplemented!(),
                 },
             }),
+            target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
+            probe_rate_mbps: value.probe_rate.into_inner(),
+            probe_duration_secs: value.probe_duration.into_inner(),
         }
     }
 }
