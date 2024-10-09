@@ -10,12 +10,12 @@ pub mod proto {
 }
 pub mod cli;
 pub mod distribution;
+pub mod workload;
 
 mod manager;
 mod units;
 pub(crate) mod util;
 mod worker;
-mod workload;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
