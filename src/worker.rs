@@ -326,6 +326,7 @@ async fn connect(
     Ok(EmuWorkerClient::new(channel))
 }
 
+#[inline]
 fn mk_uninit_bytes(size: usize) -> Vec<u8> {
     let mut vec = Vec::<MaybeUninit<u8>>::with_capacity(size);
     unsafe {
