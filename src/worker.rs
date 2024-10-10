@@ -234,7 +234,6 @@ impl RunContext {
                     .expect("Failed to send RPC");
                 let latency = now.elapsed();
                 let slowdown = latency.as_nanos() as f64 / min_latency.as_nanos() as f64;
-                eprintln!("slowdown = {:?}", slowdown);
                 histogram.record(slowdown);
             });
             now = Instant::now();
