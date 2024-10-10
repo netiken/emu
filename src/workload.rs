@@ -22,7 +22,7 @@ pub struct RunSpecification {
 
 impl RunSpecification {
     /// Gets the minimum number of nr workers necessary for this run specification
-    pub fn get_nr_workers(&self) -> Result<usize, Error> {
+    pub fn nr_workers(&self) -> Result<usize, Error> {
         let mut unique_nr_workers = HashSet::<WorkerId>::new();
         self.p2p_workloads.iter().for_each(|workload| {
             unique_nr_workers.insert(workload.src);
@@ -31,8 +31,8 @@ impl RunSpecification {
         Ok(unique_nr_workers.len())
     }
 
-    /// Gets the duration of this experiment
-    pub fn get_duration(&self) -> Result<Secs, Error> {
+    /// Gets the running duration of this experiment, not including the probe duration.
+    pub fn run_duration(&self) -> Result<Secs, Error> {
         Ok(self
             .p2p_workloads
             .iter()
