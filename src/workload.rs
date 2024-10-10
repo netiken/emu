@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::{
@@ -17,6 +18,23 @@ pub struct RunSpecification {
     pub size_distribution: Arc<Ecdf>,
     pub probe_rate: Mbps,
     pub probe_duration: Secs,
+}
+
+impl RunSpecification {
+    /// Gets the minimum number of nr workers necessary for this run specification
+    pub fn get_nr_workers(&self) -> Result<usize, Error> {
+        let mut unique_nr_workers = HashSet::<WorkerId>::new();
+        self.p2p_workloads.iter().for_each(|workload| { 
+            unique_nr_workers.insert(workload.src);
+            unique_nr_workers.insert(workload.dst);
+        });
+        Ok(unique_nr_workers.len())
+    }
+
+    /// Gets the duration of this experiment
+    pub fn get_duration(&self) -> Result<Secs, Error> {
+        Ok(self.p2p_workloads.iter().map(|workload| workload.duration).max().unwrap())
+    }
 }
 
 impl TryFrom<proto::RunSpecification> for RunSpecification {
