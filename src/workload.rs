@@ -121,6 +121,7 @@ pub struct P2PWorkload {
     pub delta_distribution_shape: DistShape,
     pub target_rate: Mbps,
     pub duration: Secs,
+    pub nr_connections: usize,
 }
 
 impl TryFrom<proto::P2pWorkload> for P2PWorkload {
@@ -153,6 +154,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
             delta_distribution_shape,
             target_rate,
             duration,
+            nr_connections: proto.nr_connections as usize,
         })
     }
 }
@@ -178,6 +180,7 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             }),
             target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
+            nr_connections: value.nr_connections as u32,
         }
     }
 }

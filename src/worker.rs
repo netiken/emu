@@ -149,22 +149,25 @@ impl EmuWorker for Worker {
             let histogram = histograms.entry(workload.dscp).or_insert_with(
                 || metrics::histogram!("slowdown", "dscp" => workload.dscp.to_string()),
             );
-            let ctx = RunContext {
-                client: connect(address, Some(workload.dscp)).await?,
-                sizes: Arc::clone(&spec.size_distribution),
-                deltas: workload.delta_distribution_shape,
-                target_rate: workload.target_rate,
-                duration: workload.duration,
-                histogram: histogram.clone(),
-                latency_map: latency_maps
-                    .get(&workload.dst)
-                    .expect("Missing latency map")
-                    .to_owned(),
-                should_stop: Arc::clone(&self.is_stopped),
-            };
-            // Initiate the point-to-point workload.
-            let handle = task::spawn(async move { ctx.run().await });
-            handles.push(handle)
+            let rate_per_connection = divvy_rate(workload.target_rate, workload.nr_connections);
+            for _ in 0..workload.nr_connections {
+                let ctx = RunContext {
+                    client: connect(address, Some(workload.dscp)).await?,
+                    sizes: Arc::clone(&spec.size_distribution),
+                    deltas: workload.delta_distribution_shape,
+                    target_rate: rate_per_connection,
+                    duration: workload.duration,
+                    histogram: histogram.clone(),
+                    latency_map: latency_maps
+                        .get(&workload.dst)
+                        .expect("Missing latency map")
+                        .to_owned(),
+                    should_stop: Arc::clone(&self.is_stopped),
+                };
+                // Initiate the workload.
+                let handle = task::spawn(async move { ctx.run().await });
+                handles.push(handle)
+            }
         }
         for handle in handles {
             handle
@@ -348,6 +351,12 @@ fn mean_delta_for_rate(rate: impl Into<BitsPerSec>, mean_size: impl Into<Bytes>)
     let mean_size = mean_size.into().into_inner() as f64;
     let mean_delta = (rate / 8.0 / mean_size).recip() * 1e9;
     Nanosecs::new(mean_delta as u64)
+}
+
+fn divvy_rate(rate: Mbps, nr_connections: usize) -> Mbps {
+    let rate = rate.into_inner() as f64;
+    let nr_connections = nr_connections as f64;
+    Mbps::new((rate / nr_connections).round() as u32)
 }
 
 #[derive(Debug, Clone, Copy)]

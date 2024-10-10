@@ -55,6 +55,7 @@ message P2PWorkload {
     DistShape delta_distribution_shape = 4;
     uint32 target_rate_mbps = 5;
     uint32 duration_secs = 6;
+    uint32 nr_connections = 7;
 }
 
 message Ecdf {

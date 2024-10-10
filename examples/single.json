@@ -10,7 +10,8 @@
         }
       },
       "target_rate": 2000,
-      "duration": 120
+      "duration": 120,
+      "nr_connections": 2
     }
   ],
   "size_distribution": {
