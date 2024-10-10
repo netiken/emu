@@ -12,10 +12,12 @@ use crate::{
 // gRPC limits the maximum messages size to 4MB.
 pub const SZ_GRPC_MAX: usize = 4 * 1024 * 1024;
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunSpecification {
     pub p2p_workloads: Vec<P2PWorkload>,
-    pub size_distributions: HashMap<String, Arc<Ecdf>>,
+    pub size_distribution: Arc<Ecdf>,
+    pub probe_rate: Mbps,
+    pub probe_duration: Secs,
 }
 
 impl RunSpecification {
@@ -44,22 +46,25 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
             .into_iter()
             .map(P2PWorkload::try_from)
             .collect::<Result<_, _>>()?;
-        let size_distributions = proto
-            .size_distributions
-            .into_iter()
-            .map(|(k, v)| {
-                let &proto::CdfPoint { x: max, .. } =
-                    v.points.last().ok_or(Error::Ecdf(EcdfError::NoValues))?;
-                let max = max.ceil() as usize;
-                if max >= SZ_GRPC_MAX {
-                    return Err(Error::MaxMessageSize(max));
-                }
-                Result::<_, Self::Error>::Ok((k, Arc::new(Ecdf::try_from(v)?)))
-            })
-            .collect::<Result<HashMap<_, _>, _>>()?;
+        let size_distribution = proto
+            .size_distribution
+            .ok_or(Error::MissingField("size_distribution"))?;
+        let &proto::CdfPoint { x: max, .. } = size_distribution
+            .points
+            .last()
+            .ok_or(Error::Ecdf(EcdfError::NoValues))?;
+        let max = max.ceil() as usize;
+        if max >= SZ_GRPC_MAX {
+            return Err(Error::MaxMessageSize(max));
+        }
+        let size_distribution = Arc::new(Ecdf::try_from(size_distribution)?);
+        let probe_rate = Mbps::new(proto.probe_rate_mbps);
+        let probe_duration = Secs::new(proto.probe_duration_secs);
         Ok(Self {
             p2p_workloads,
-            size_distributions,
+            size_distribution,
+            probe_rate,
+            probe_duration,
         })
     }
 }
@@ -96,11 +101,9 @@ impl From<RunSpecification> for proto::RunSpecification {
                 .into_iter()
                 .map(proto::P2pWorkload::from)
                 .collect(),
-            size_distributions: spec
-                .size_distributions
-                .into_iter()
-                .map(|(k, v)| (k, proto::Ecdf::from((*v).clone())))
-                .collect(),
+            size_distribution: Some(proto::Ecdf::from((*spec.size_distribution).clone())),
+            probe_rate_mbps: spec.probe_rate.into_inner(),
+            probe_duration_secs: spec.probe_duration.into_inner(),
         }
     }
 }
@@ -110,9 +113,8 @@ pub struct P2PWorkload {
     pub src: WorkerId,
     pub dst: WorkerId,
     pub dscp: Dscp,
-    pub target_rate: Mbps,
-    pub size_distribution_name: String,
     pub delta_distribution_shape: DistShape,
+    pub target_rate: Mbps,
     pub duration: Secs,
 }
 
@@ -126,8 +128,6 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
         let dst = WorkerId::new(dst);
         let dscp = proto.dscp.ok_or(Error::MissingField("dscp"))?;
         let dscp = Dscp::try_new(dscp).map_err(|_| Error::InvalidDscp(dscp))?;
-        let rate = Mbps::new(proto.target_rate_mbps);
-        let size_distribution_name = proto.size_distribution_name;
         let delta_distribution_shape = proto
             .delta_distribution_shape
             .ok_or(Error::MissingField("delta_distribution_shape"))?
@@ -139,14 +139,14 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
                 DistShape::LogNormal { sigma: shape.sigma }
             }
         };
+        let target_rate = Mbps::new(proto.target_rate_mbps);
         let duration = Secs::new(proto.duration_secs);
         Ok(Self {
             src,
             dst,
             dscp,
-            target_rate: rate,
-            size_distribution_name,
             delta_distribution_shape,
+            target_rate,
             duration,
         })
     }
@@ -158,8 +158,6 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             src: Some(value.src.into_inner()),
             dst: Some(value.dst.into_inner()),
             dscp: Some(value.dscp.into_inner()),
-            target_rate_mbps: value.target_rate.into_inner(),
-            size_distribution_name: value.size_distribution_name,
             delta_distribution_shape: Some(proto::DistShape {
                 shape: match value.delta_distribution_shape {
                     DistShape::Exponential => Some(proto::dist_shape::Shape::Exponential(
@@ -173,6 +171,7 @@ impl From<P2PWorkload> for proto::P2pWorkload {
                     _ => unimplemented!(),
                 },
             }),
+            target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
         }
     }

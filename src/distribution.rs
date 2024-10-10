@@ -224,6 +224,31 @@ impl Distribution<f64> for Ecdf {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SampleWithBucket {
+    pub bucket: usize,
+    pub sample: f64,
+}
+
+impl Distribution<SampleWithBucket> for Ecdf {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> SampleWithBucket {
+        let y = rng.gen_range(0.0..=100.0);
+        let mut i = 0;
+        while y > self.ecdf[i].1 {
+            i += 1;
+        }
+        let sample = match i {
+            0 => self.ecdf[0].0,
+            _ => {
+                let (x0, y0) = self.ecdf[i - 1];
+                let (x1, y1) = self.ecdf[i];
+                x0 + (x1 - x0) / (y1 - y0) * (y - y0)
+            }
+        };
+        SampleWithBucket { bucket: i, sample }
+    }
+}
+
 pub fn read_ecdf(path: impl AsRef<Path>) -> anyhow::Result<Ecdf> {
     let s = std::fs::read_to_string(path).context("failed to read CDF file")?;
     let v = s
