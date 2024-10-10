@@ -15,6 +15,8 @@ pub const SZ_GRPC_MAX: usize = 4 * 1024 * 1024;
 pub struct RunSpecification {
     pub p2p_workloads: Vec<P2PWorkload>,
     pub size_distribution: Arc<Ecdf>,
+    pub probe_rate: Mbps,
+    pub probe_duration: Secs,
 }
 
 impl TryFrom<proto::RunSpecification> for RunSpecification {
@@ -37,9 +39,14 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
         if max >= SZ_GRPC_MAX {
             return Err(Error::MaxMessageSize(max));
         }
+        let size_distribution = Arc::new(Ecdf::try_from(size_distribution)?);
+        let probe_rate = Mbps::new(proto.probe_rate_mbps);
+        let probe_duration = Secs::new(proto.probe_duration_secs);
         Ok(Self {
             p2p_workloads,
-            size_distribution: Arc::new(Ecdf::try_from(size_distribution)?),
+            size_distribution,
+            probe_rate,
+            probe_duration,
         })
     }
 }
@@ -77,6 +84,8 @@ impl From<RunSpecification> for proto::RunSpecification {
                 .map(proto::P2pWorkload::from)
                 .collect(),
             size_distribution: Some(proto::Ecdf::from((*spec.size_distribution).clone())),
+            probe_rate_mbps: spec.probe_rate.into_inner(),
+            probe_duration_secs: spec.probe_duration.into_inner(),
         }
     }
 }
@@ -89,8 +98,6 @@ pub struct P2PWorkload {
     pub delta_distribution_shape: DistShape,
     pub target_rate: Mbps,
     pub duration: Secs,
-    pub probe_rate: Mbps,
-    pub probe_duration: Secs,
 }
 
 impl TryFrom<proto::P2pWorkload> for P2PWorkload {
@@ -116,8 +123,6 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
         };
         let target_rate = Mbps::new(proto.target_rate_mbps);
         let duration = Secs::new(proto.duration_secs);
-        let probe_rate = Mbps::new(proto.probe_rate_mbps);
-        let probe_duration = Secs::new(proto.probe_duration_secs);
         Ok(Self {
             src,
             dst,
@@ -125,8 +130,6 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
             delta_distribution_shape,
             target_rate,
             duration,
-            probe_rate,
-            probe_duration,
         })
     }
 }
@@ -152,8 +155,6 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             }),
             target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
-            probe_rate_mbps: value.probe_rate.into_inner(),
-            probe_duration_secs: value.probe_duration.into_inner(),
         }
     }
 }

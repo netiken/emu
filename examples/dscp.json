@@ -10,9 +10,7 @@
         }
       },
       "target_rate": 250,
-      "duration": 120,
-      "probe_rate": 100,
-      "probe_duration": 10
+      "duration": 120
     },
     {
       "src": 1,
@@ -24,9 +22,7 @@
         }
       },
       "target_rate": 250,
-      "duration": 120,
-      "probe_rate": 100,
-      "probe_duration": 10
+      "duration": 120
     }
   ],
   "size_distribution": {
@@ -37,5 +33,7 @@
       [100000.0, 75.0],
       [1000000.0, 100.0]
     ]
-  }
+  },
+  "probe_rate": 100,
+  "probe_duration": 30
 }

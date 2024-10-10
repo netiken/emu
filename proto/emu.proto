@@ -31,6 +31,8 @@ message CheckResponse {
 message RunSpecification {
     repeated P2PWorkload p2p_workloads = 1;
     Ecdf size_distribution = 2;
+    uint32 probe_rate_mbps = 3;
+    uint32 probe_duration_secs = 4;
 }
 
 message ExponentialShape {}
@@ -53,8 +55,6 @@ message P2PWorkload {
     DistShape delta_distribution_shape = 4;
     uint32 target_rate_mbps = 5;
     uint32 duration_secs = 6;
-    uint32 probe_rate_mbps = 7;
-    uint32 probe_duration_secs = 8;
 }
 
 message Ecdf {
