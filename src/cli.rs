@@ -50,6 +50,10 @@ pub enum Command {
         #[arg(short, long)]
         manager_addr: SocketAddr,
     },
+    Stop {
+        #[arg(short, long)]
+        manager_addr: SocketAddr,
+    },
 }
 
 impl Command {
@@ -91,6 +95,11 @@ impl Command {
                 let spec = fs::read_to_string(spec)?;
                 let spec: crate::RunSpecification = serde_json::from_str(&spec)?;
                 run(spec, manager_addr).await?;
+            }
+            Command::Stop { manager_addr } => {
+                let mut client =
+                    EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+                client.stop(Request::new(())).await?;
             }
         }
         Ok(())
