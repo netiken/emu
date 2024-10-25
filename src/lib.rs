@@ -13,7 +13,7 @@ pub mod distribution;
 pub mod workload;
 
 mod manager;
-mod units;
+pub mod units;
 pub(crate) mod util;
 mod worker;
 
