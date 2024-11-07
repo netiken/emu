@@ -139,25 +139,26 @@ impl EmuWorker for Worker {
             .map_err(|e| Status::from_error(Box::new(e)))?;
         let latency_maps = self.probe_all(&spec).await?;
         let mut handles = Vec::new();
-        let mut histograms = HashMap::<Dscp, Histogram>::new();
+        let mut histograms = HashMap::<Dscp, Arc<DashMap<usize, Histogram>>>::new();
         for workload in spec.p2p_workloads {
             if workload.src != self.id {
                 continue;
             }
             // Prepare the point-to-point context.
             let address = self.addr_or_err(workload.dst)?;
-            let histogram = histograms.entry(workload.dscp).or_insert_with(
-                || metrics::histogram!("slowdown", "dscp" => workload.dscp.to_string()),
-            );
+            let histograms = histograms
+                .entry(workload.dscp)
+                .or_insert_with(|| Arc::new(DashMap::new()));
             let rate_per_connection = divvy_rate(workload.target_rate, workload.nr_connections);
             for _ in 0..workload.nr_connections {
                 let ctx = RunContext {
                     client: connect(address, Some(workload.dscp)).await?,
+                    dscp: workload.dscp,
                     sizes: Arc::clone(&spec.size_distribution),
                     deltas: workload.delta_distribution_shape,
                     target_rate: rate_per_connection,
                     duration: workload.duration,
-                    histogram: histogram.clone(),
+                    histograms: Arc::clone(histograms),
                     latency_map: latency_maps
                         .get(&workload.dst)
                         .expect("Missing latency map")
@@ -190,12 +191,13 @@ impl EmuWorker for Worker {
 #[derivative(Debug)]
 struct RunContext {
     client: EmuWorkerClient<Channel>,
+    dscp: Dscp,
     sizes: Arc<Ecdf>,
     deltas: DistShape,
     target_rate: Mbps,
     duration: Secs,
     #[derivative(Debug = "ignore")]
-    histogram: Histogram,
+    histograms: Arc<DashMap<usize, Histogram>>,
     latency_map: LatencyMap,
     should_stop: Arc<AtomicBool>,
 }
@@ -228,7 +230,17 @@ impl RunContext {
 
             // Start the next RPC.
             let mut client = self.client.clone();
-            let histogram = self.histogram.clone();
+            let histogram = self
+                .histograms
+                .entry(bucket)
+                .or_insert_with(|| {
+                    metrics::histogram!(
+                        "slowdown",
+                        "dscp" => self.dscp.to_string(),
+                        "bucket" => bucket.to_string()
+                    )
+                })
+                .clone();
             task::spawn(async move {
                 let now = Instant::now();
                 client
