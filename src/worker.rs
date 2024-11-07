@@ -203,7 +203,7 @@ struct RunContext {
 impl RunContext {
     async fn run(&self) -> Result<(), Status> {
         let mut rng = StdRng::from_entropy();
-        let deltas = delta_distribution(&self.sizes, self.target_rate)
+        let deltas = delta_distribution(&self.sizes, self.deltas, self.target_rate)
             .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
         let duration = Duration::from_secs(self.duration.into_inner() as u64);
         let mut now = Instant::now();
@@ -265,7 +265,7 @@ impl ProbeContext {
     async fn run(&self) -> Result<LatencyMap, Status> {
         let mut rng = StdRng::from_entropy();
         let mut handles = Vec::new();
-        let deltas = delta_distribution(&self.sizes, self.target_rate)
+        let deltas = delta_distribution(&self.sizes, DistShape::Constant, self.target_rate)
             .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
         let duration = Duration::from_secs(self.duration.into_inner() as u64);
         let mut now = Instant::now();
@@ -338,12 +338,14 @@ fn mk_uninit_bytes(size: usize) -> Vec<u8> {
     }
 }
 
-fn delta_distribution(sizes: &Arc<Ecdf>, rate: Mbps) -> anyhow::Result<Box<dyn GenF64 + Send>> {
+fn delta_distribution(
+    sizes: &Arc<Ecdf>,
+    shape: DistShape,
+    rate: Mbps,
+) -> anyhow::Result<Box<dyn GenF64 + Send>> {
     let mean_size = Bytes::new(sizes.mean().round() as u64);
     let mean_delta = mean_delta_for_rate(rate, mean_size);
-    DistShape::Constant
-        .to_kind(mean_delta.into_inner() as f64)
-        .to_gen()
+    shape.to_kind(mean_delta.into_inner() as f64).to_gen()
 }
 
 fn mean_delta_for_rate(rate: impl Into<BitsPerSec>, mean_size: impl Into<Bytes>) -> Nanosecs {
