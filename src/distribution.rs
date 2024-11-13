@@ -237,15 +237,21 @@ impl Distribution<SampleWithBucket> for Ecdf {
         while y > self.ecdf[i].1 {
             i += 1;
         }
-        let sample = match i {
-            0 => self.ecdf[0].0,
+        match i {
+            0 => SampleWithBucket {
+                bucket: 0,
+                sample: self.ecdf[0].0,
+            },
             _ => {
                 let (x0, y0) = self.ecdf[i - 1];
                 let (x1, y1) = self.ecdf[i];
-                x0 + (x1 - x0) / (y1 - y0) * (y - y0)
+                let sample = x0 + (x1 - x0) / (y1 - y0) * (y - y0);
+                SampleWithBucket {
+                    bucket: i - 1,
+                    sample,
+                }
             }
-        };
-        SampleWithBucket { bucket: i, sample }
+        }
     }
 }
 

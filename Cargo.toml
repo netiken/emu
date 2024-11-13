@@ -16,7 +16,7 @@ hyper = { version = "1.4.1", features = ["full"] }
 hyper-util = { version = "0.1.6", features = ["full"] }
 infinity-sampler = "0.3.0"
 metrics = "0.23.0"
-metrics-exporter-prometheus = "0.15.3"
+metrics-exporter-prometheus = "0.16"
 nutype = { version = "0.4.3", features = ["serde"] }
 ordered-float = "4.2.2"
 pin-project-lite = "0.2.14"
