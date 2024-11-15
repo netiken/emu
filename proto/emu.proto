@@ -33,6 +33,7 @@ message RunSpecification {
     Ecdf size_distribution = 2;
     uint32 probe_rate_mbps = 3;
     uint32 probe_duration_secs = 4;
+    repeated uint64 output_buckets = 5;
 }
 
 message ExponentialShape {}

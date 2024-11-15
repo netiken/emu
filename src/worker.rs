@@ -163,6 +163,7 @@ impl EmuWorker for Worker {
                         .get(&workload.dst)
                         .expect("Missing latency map")
                         .to_owned(),
+                    output_buckets: spec.output_buckets.clone(),
                     should_stop: Arc::clone(&self.is_stopped),
                 };
                 // Initiate the workload.
@@ -199,6 +200,7 @@ struct RunContext {
     #[derivative(Debug = "ignore")]
     histograms: Arc<DashMap<usize, Histogram>>,
     latency_map: LatencyMap,
+    output_buckets: Vec<Bytes>,
     should_stop: Arc<AtomicBool>,
 }
 
@@ -213,13 +215,13 @@ impl RunContext {
         while now < end && !self.should_stop() {
             // Generate the next RPC request payload.
             let SampleWithBucket {
-                bucket,
+                bucket: input_bucket,
                 sample: size,
             } = Distribution::<SampleWithBucket>::sample(&*self.sizes, &mut rng);
             let data = mk_uninit_bytes(size as usize);
-            let min_latency = self.latency_map.get(&bucket).copied().ok_or_else(|| {
+            let min_latency = self.latency_map.get(&input_bucket).copied().ok_or_else(|| {
                 Status::failed_precondition(format!(
-                    "Unable to find min latency for bucket {bucket}. Use a longer probe duration."
+                    "Unable to find min latency for bucket {input_bucket}. Use a longer probe duration."
                 ))
             })?;
 
@@ -230,14 +232,25 @@ impl RunContext {
 
             // Start the next RPC.
             let mut client = self.client.clone();
+            let size = size as u64;
+            let output_bucket = self
+                .output_buckets
+                .iter()
+                .enumerate()
+                .find_map(|(i, b)| (size <= b.into_inner()).then_some(i))
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!(
+                        "Unable to find output bucket for size {size}."
+                    ))
+                })?;
             let histogram = self
                 .histograms
-                .entry(bucket)
+                .entry(input_bucket)
                 .or_insert_with(|| {
                     metrics::histogram!(
                         "slowdown",
                         "dscp" => self.dscp.to_string(),
-                        "bucket" => bucket.to_string()
+                        "bucket" => output_bucket.to_string()
                     )
                 })
                 .clone();
