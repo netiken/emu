@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     distribution::{DistShape, Ecdf, EcdfError},
     proto,
-    units::{Dscp, Mbps, Secs},
+    units::{Bytes, Dscp, Mbps, Secs},
     Error, WorkerId,
 };
 
@@ -18,6 +18,7 @@ pub struct RunSpecification {
     pub size_distribution: Arc<Ecdf>,
     pub probe_rate: Mbps,
     pub probe_duration: Secs,
+    pub output_buckets: Vec<Bytes>,
 }
 
 impl RunSpecification {
@@ -65,11 +66,13 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
         let size_distribution = Arc::new(Ecdf::try_from(size_distribution)?);
         let probe_rate = Mbps::new(proto.probe_rate_mbps);
         let probe_duration = Secs::new(proto.probe_duration_secs);
+        let output_buckets = proto.output_buckets.into_iter().map(Bytes::new).collect();
         Ok(Self {
             p2p_workloads,
             size_distribution,
             probe_rate,
             probe_duration,
+            output_buckets,
         })
     }
 }
@@ -109,6 +112,11 @@ impl From<RunSpecification> for proto::RunSpecification {
             size_distribution: Some(proto::Ecdf::from((*spec.size_distribution).clone())),
             probe_rate_mbps: spec.probe_rate.into_inner(),
             probe_duration_secs: spec.probe_duration.into_inner(),
+            output_buckets: spec
+                .output_buckets
+                .into_iter()
+                .map(|b| b.into_inner())
+                .collect(),
         }
     }
 }
