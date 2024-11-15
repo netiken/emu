@@ -15,10 +15,9 @@ use tokio::{
 };
 use tonic::{transport::Server, Code, Request, Status};
 
-const DEFAULT_BUCKETS: &[f64] = &[
-    1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0,
-    40.0, 50.0, 60.0, 70.0,
-];
+const DEFAULT_BUCKETS: &str = "1.0,2.0,4.0,6.0,8.0,10.0,15.0,20.0,\
+                               25.0,30.0,35.0,40.0,45.0,50.0,60.0,70.0,\
+                               80.0,90.0,100.0,1000.0";
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
@@ -38,6 +37,9 @@ pub enum Command {
 
         #[arg(long, default_value = "0.0.0.0:9000")]
         metrics_addr: SocketAddr,
+
+        #[arg(short, long, value_delimiter=',', default_value = DEFAULT_BUCKETS)]
+        buckets: Vec<f64>,
     },
     Check {
         #[arg(short, long)]
@@ -72,8 +74,9 @@ impl Command {
                 advertise_addr,
                 manager_addr,
                 metrics_addr,
+                buckets,
             } => {
-                init_metrics(metrics_addr, DEFAULT_BUCKETS)?;
+                init_metrics(metrics_addr, &buckets)?;
                 let handle = task::spawn(async move {
                     let worker = Worker::new(id);
                     let addr = format!("0.0.0.0:{}", advertise_addr.port()).parse()?;
