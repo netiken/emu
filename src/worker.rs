@@ -245,7 +245,7 @@ impl RunContext {
                 })?;
             let histogram = self
                 .histograms
-                .entry(input_bucket)
+                .entry(output_bucket)
                 .or_insert_with(|| {
                     metrics::histogram!(
                         "slowdown",
