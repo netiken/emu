@@ -2,6 +2,7 @@ use nutype::nutype;
 
 #[nutype(derive(
     Debug,
+    Display,
     Clone,
     Copy,
     PartialEq,
@@ -17,6 +18,7 @@ pub struct Bytes(u64);
 
 #[nutype(derive(
     Debug,
+    Display,
     Clone,
     Copy,
     PartialEq,
@@ -32,6 +34,7 @@ pub struct Secs(u32);
 
 #[nutype(derive(
     Debug,
+    Display,
     Clone,
     Copy,
     PartialEq,
@@ -47,6 +50,7 @@ pub struct Nanosecs(u64);
 
 #[nutype(derive(
     Debug,
+    Display,
     Clone,
     Copy,
     PartialEq,
@@ -62,6 +66,7 @@ pub struct Mbps(u32);
 
 #[nutype(derive(
     Debug,
+    Display,
     Clone,
     Copy,
     PartialEq,
