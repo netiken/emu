@@ -271,6 +271,60 @@ impl From<P2PWorkload> for proto::P2pWorkload {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingRequest {
+    pub src: WorkerId,
+    pub dst: WorkerId,
+}
+
+impl TryFrom<proto::PingRequest> for PingRequest {
+    type Error = Error;
+
+    fn try_from(proto: proto::PingRequest) -> Result<Self, Self::Error> {
+        let src = proto.src.ok_or(Error::MissingField("src"))?;
+        let dst = proto.dst.ok_or(Error::MissingField("dst"))?;
+        Ok(Self {
+            src: WorkerId::new(src),
+            dst: WorkerId::new(dst),
+        })
+    }
+}
+
+impl From<PingRequest> for proto::PingRequest {
+    fn from(value: PingRequest) -> Self {
+        Self {
+            src: Some(value.src.into_inner()),
+            dst: Some(value.dst.into_inner()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingResponse {
+    pub times: Vec<Microsecs>,
+}
+
+impl TryFrom<proto::PingResponse> for PingResponse {
+    type Error = Error;
+
+    fn try_from(value: proto::PingResponse) -> Result<Self, Self::Error> {
+        let times = value
+            .times_us
+            .into_iter()
+            .map(Microsecs::new)
+            .collect::<Vec<_>>();
+        Ok(Self { times })
+    }
+}
+
+impl From<PingResponse> for proto::PingResponse {
+    fn from(value: PingResponse) -> Self {
+        Self {
+            times_us: value.times.into_iter().map(|t| t.into_inner()).collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

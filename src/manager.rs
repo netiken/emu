@@ -6,7 +6,7 @@ use tonic::{Request, Response, Status};
 use crate::proto::emu_manager_server::EmuManager;
 use crate::proto::emu_worker_client::EmuWorkerClient;
 use crate::worker::{WorkerAddress, WorkerId, WorkerRegistration};
-use crate::{proto, RunInput};
+use crate::{proto, PingRequest, RunInput};
 
 #[derive(Debug, Default)]
 pub struct Manager {
@@ -55,6 +55,21 @@ impl EmuManager for Manager {
     async fn stop(&self, _: Request<()>) -> Result<Response<()>, Status> {
         self.stop_workers().await?;
         Ok(Response::new(()))
+    }
+
+    async fn ping(
+        &self,
+        request: Request<proto::PingRequest>,
+    ) -> Result<Response<proto::PingResponse>, Status> {
+        let ping = PingRequest::try_from(request.into_inner())
+            .map_err(|e| Status::from_error(Box::new(e)))?;
+        self.introduce_peers_to_workers().await?;
+        let mut client = self
+            .wid2client
+            .get(&ping.src)
+            .ok_or_else(|| Status::not_found("worker not found"))?
+            .clone();
+        client.ping(Request::new(ping.into())).await
     }
 }
 

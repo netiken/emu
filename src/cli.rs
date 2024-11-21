@@ -59,6 +59,16 @@ pub enum Command {
         #[arg(short, long)]
         manager_addr: SocketAddr,
     },
+    Ping {
+        #[arg(short, long)]
+        manager_addr: SocketAddr,
+
+        #[arg(short, long)]
+        src: WorkerId,
+
+        #[arg(short, long)]
+        dst: WorkerId,
+    },
 }
 
 impl Command {
@@ -113,6 +123,18 @@ impl Command {
                 let mut client =
                     EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
                 client.stop(Request::new(())).await?;
+            }
+            Command::Ping {
+                manager_addr,
+                src,
+                dst,
+            } => {
+                let mut client =
+                    EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+                let ping = crate::PingRequest { src, dst };
+                let response = client.ping(Request::new(ping.into())).await?;
+                let response = response.into_inner();
+                println!("Ping microseconds: {:?}", response.times_us);
             }
         }
         Ok(())

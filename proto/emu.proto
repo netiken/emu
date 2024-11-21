@@ -12,6 +12,8 @@ service EmuManager {
     rpc Run(RunInput) returns (google.protobuf.Empty);
 
     rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    rpc Ping(PingRequest) returns (PingResponse);
 }
 
 message WorkerRegistration {
@@ -82,6 +84,15 @@ message CdfPoint {
     double y = 2;
 }
 
+message PingRequest {
+    google.protobuf.UInt32Value src = 1;
+    google.protobuf.UInt32Value dst = 2;
+}
+
+message PingResponse {
+    repeated uint64 times_us = 1;
+}
+
 message GenericRequestResponse {
     bytes data = 1;
 }
@@ -94,6 +105,8 @@ service EmuWorker {
     rpc Run(RunInput) returns (google.protobuf.Empty);
 
     rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    rpc Ping(PingRequest) returns (PingResponse);
 
     rpc GenericRpc(GenericRequestResponse) returns (GenericRequestResponse);
 }

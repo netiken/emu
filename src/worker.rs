@@ -16,9 +16,9 @@ use tonic::{
 use crate::{
     distribution::{DistShape, Ecdf, GenF64},
     proto::{self, emu_worker_client::EmuWorkerClient, emu_worker_server::EmuWorker},
-    units::{BitsPerSec, Bytes, Dscp, Mbps, Nanosecs, Secs},
+    units::{BitsPerSec, Bytes, Dscp, Mbps, Microsecs, Nanosecs, Secs},
     util::http::HttpConnector,
-    Error, NetworkProfile, RunInput,
+    Error, NetworkProfile, PingRequest, PingResponse, RunInput,
 };
 use std::{
     collections::HashMap,
@@ -134,6 +134,31 @@ impl EmuWorker for Worker {
                 .map_err(|e| Status::from_error(Box::new(e)))??;
         }
         Ok(Response::new(()))
+    }
+
+    async fn ping(
+        &self,
+        request: Request<proto::PingRequest>,
+    ) -> Result<Response<proto::PingResponse>, Status> {
+        let ping = PingRequest::try_from(request.into_inner())
+            .map_err(|e| Status::from_error(Box::new(e)))?;
+        let address = self.addr_or_err(ping.dst)?;
+        let mut client = connect(address, None).await?;
+        let mut times = Vec::new();
+        for _ in 0..10 {
+            let now = Instant::now();
+            client
+                .generic_rpc(Request::new(proto::GenericRequestResponse {
+                    data: Vec::new(),
+                }))
+                .await
+                .expect("Failed to send RPC");
+            let latency = Microsecs::new(now.elapsed().as_micros() as u64);
+            times.push(latency);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        let response = PingResponse { times };
+        Ok(Response::new(response.into()))
     }
 
     async fn generic_rpc(
