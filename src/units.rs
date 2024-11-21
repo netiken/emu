@@ -46,7 +46,29 @@ pub struct Secs(u32);
     Serialize,
     Deserialize
 ))]
+pub struct Microsecs(u64);
+
+#[nutype(derive(
+    Debug,
+    Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    FromStr,
+    Serialize,
+    Deserialize
+))]
 pub struct Nanosecs(u64);
+
+impl From<Microsecs> for Nanosecs {
+    fn from(microsecs: Microsecs) -> Self {
+        Nanosecs::new(microsecs.into_inner() * 1_000)
+    }
+}
 
 #[nutype(derive(
     Debug,

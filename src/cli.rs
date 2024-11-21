@@ -3,7 +3,7 @@ use std::{fs, net::SocketAddr, path::PathBuf, process};
 use crate::{
     proto::{
         emu_manager_client::EmuManagerClient, emu_manager_server::EmuManagerServer,
-        emu_worker_server::EmuWorkerServer, RunSpecification, WorkerAddress, WorkerRegistration,
+        emu_worker_server::EmuWorkerServer, RunInput, WorkerAddress, WorkerRegistration,
     },
     Manager, Worker, WorkerId,
 };
@@ -47,7 +47,7 @@ pub enum Command {
     },
     Run {
         #[arg(short, long)]
-        spec: PathBuf,
+        input: PathBuf,
 
         #[arg(short, long)]
         manager_addr: SocketAddr,
@@ -94,10 +94,13 @@ impl Command {
                 let nr_workers = check(manager_addr).await?;
                 println!("Manager is up, and {} workers are up.", nr_workers);
             }
-            Command::Run { spec, manager_addr } => {
-                let spec = fs::read_to_string(spec)?;
-                let spec: crate::RunSpecification = serde_json::from_str(&spec)?;
-                run(spec, manager_addr).await?;
+            Command::Run {
+                input,
+                manager_addr,
+            } => {
+                let input = fs::read_to_string(input)?;
+                let input: crate::RunInput = serde_json::from_str(&input)?;
+                run(input, manager_addr).await?;
             }
             Command::Stop { manager_addr } => {
                 let mut client =
@@ -115,7 +118,7 @@ pub async fn check(manager_addr: SocketAddr) -> anyhow::Result<usize> {
     Ok(response.get_ref().nr_workers.unwrap() as usize)
 }
 
-pub async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> anyhow::Result<()> {
+pub async fn run(input: crate::RunInput, manager_addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
     let mut client_ = client.clone();
     task::spawn(async move {
@@ -127,8 +130,8 @@ pub async fn run(spec: crate::RunSpecification, manager_addr: SocketAddr) -> any
             .expect("Failed to stop worker");
         process::abort();
     });
-    let spec: RunSpecification = spec.into();
-    let request = Request::new(spec);
+    let input: RunInput = input.into();
+    let request = Request::new(input);
     let _response = client.run(request).await?;
     Ok(())
 }

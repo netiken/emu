@@ -6,7 +6,7 @@ use tonic::{Request, Response, Status};
 use crate::proto::emu_manager_server::EmuManager;
 use crate::proto::emu_worker_client::EmuWorkerClient;
 use crate::worker::{WorkerAddress, WorkerId, WorkerRegistration};
-use crate::{proto, RunSpecification};
+use crate::{proto, RunInput};
 
 #[derive(Debug, Default)]
 pub struct Manager {
@@ -44,8 +44,8 @@ impl EmuManager for Manager {
         }))
     }
 
-    async fn run(&self, request: Request<proto::RunSpecification>) -> Result<Response<()>, Status> {
-        let spec = RunSpecification::try_from(request.into_inner())
+    async fn run(&self, request: Request<proto::RunInput>) -> Result<Response<()>, Status> {
+        let spec = RunInput::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
         self.introduce_peers_to_workers().await?;
         self.run_workers(spec).await?;
@@ -94,11 +94,11 @@ impl Manager {
         Ok(())
     }
 
-    async fn run_workers(&self, spec: RunSpecification) -> Result<(), Status> {
+    async fn run_workers(&self, input: RunInput) -> Result<(), Status> {
         let mut handles = Vec::new();
         for entry in self.wid2client.iter() {
             let mut client = entry.value().clone();
-            let spec = spec.clone();
+            let spec = input.clone();
             let handle = task::spawn(async move {
                 client
                     .run(Request::new(spec.into()))

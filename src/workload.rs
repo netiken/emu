@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     distribution::{DistShape, Ecdf, EcdfError},
     proto,
-    units::{Bytes, Dscp, Mbps, Secs},
+    units::{BitsPerSec, Bytes, Dscp, Mbps, Microsecs, Nanosecs, Secs},
     Error, WorkerId,
 };
 
@@ -13,11 +13,47 @@ use crate::{
 pub const SZ_GRPC_MAX: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunInput {
+    pub spec: RunSpecification,
+    pub profile: NetworkProfile,
+}
+
+impl TryFrom<proto::RunInput> for RunInput {
+    type Error = Error;
+
+    fn try_from(value: proto::RunInput) -> Result<Self, Self::Error> {
+        let spec = value.run_spec.ok_or(Error::MissingField("run_spec"))?;
+        let profile = value
+            .network_profile
+            .ok_or(Error::MissingField("network_profile"))?;
+        let spec = RunSpecification::try_from(spec)?;
+        let profile = NetworkProfile::try_from(profile)?;
+        Ok(Self { spec, profile })
+    }
+}
+
+impl From<RunInput> for proto::RunInput {
+    fn from(value: RunInput) -> Self {
+        Self {
+            run_spec: Some(value.spec.into()),
+            network_profile: Some(proto::NetworkProfile {
+                profile_type: match value.profile {
+                    NetworkProfile::AllToAll(all_to_all) => Some(
+                        proto::network_profile::ProfileType::AllToAll(proto::AllToAll {
+                            rtt_us: all_to_all.rtt.into_inner(),
+                            bandwidth_mbps: all_to_all.bandwidth.into_inner(),
+                        }),
+                    ),
+                },
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunSpecification {
     pub p2p_workloads: Vec<P2PWorkload>,
     pub size_distribution: Arc<Ecdf>,
-    pub probe_rate: Mbps,
-    pub probe_duration: Secs,
     pub output_buckets: Vec<Bytes>,
 }
 
@@ -64,14 +100,10 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
             return Err(Error::MaxMessageSize(max));
         }
         let size_distribution = Arc::new(Ecdf::try_from(size_distribution)?);
-        let probe_rate = Mbps::new(proto.probe_rate_mbps);
-        let probe_duration = Secs::new(proto.probe_duration_secs);
         let output_buckets = proto.output_buckets.into_iter().map(Bytes::new).collect();
         Ok(Self {
             p2p_workloads,
             size_distribution,
-            probe_rate,
-            probe_duration,
             output_buckets,
         })
     }
@@ -110,14 +142,60 @@ impl From<RunSpecification> for proto::RunSpecification {
                 .map(proto::P2pWorkload::from)
                 .collect(),
             size_distribution: Some(proto::Ecdf::from((*spec.size_distribution).clone())),
-            probe_rate_mbps: spec.probe_rate.into_inner(),
-            probe_duration_secs: spec.probe_duration.into_inner(),
             output_buckets: spec
                 .output_buckets
                 .into_iter()
                 .map(|b| b.into_inner())
                 .collect(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NetworkProfile {
+    AllToAll(AllToAll),
+}
+
+impl NetworkProfile {
+    pub fn ideal_latency(&self, size: Bytes) -> Nanosecs {
+        match self {
+            NetworkProfile::AllToAll(profile) => profile.ideal_latency(size),
+        }
+    }
+}
+
+impl TryFrom<proto::NetworkProfile> for NetworkProfile {
+    type Error = Error;
+
+    fn try_from(proto: proto::NetworkProfile) -> Result<Self, Self::Error> {
+        let profile = proto
+            .profile_type
+            .ok_or(Error::MissingField("profile_type"))?;
+        let profile = match profile {
+            proto::network_profile::ProfileType::AllToAll(all_to_all) => {
+                NetworkProfile::AllToAll(AllToAll {
+                    rtt: Microsecs::new(all_to_all.rtt_us),
+                    bandwidth: Mbps::new(all_to_all.bandwidth_mbps),
+                })
+            }
+        };
+        Ok(profile)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllToAll {
+    pub rtt: Microsecs,
+    pub bandwidth: Mbps,
+}
+
+impl AllToAll {
+    pub fn ideal_latency(&self, size: Bytes) -> Nanosecs {
+        let rtt = Into::<Nanosecs>::into(self.rtt).into_inner() as f64;
+        let bandwidth = Into::<BitsPerSec>::into(self.bandwidth).into_inner() as f64 / 1e9;
+        let size = size.into_inner() as f64 * 8.0;
+        let latency = rtt + size / bandwidth;
+        Nanosecs::new(latency.round() as u64)
     }
 }
 
@@ -190,5 +268,20 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             duration_secs: value.duration.into_inner(),
             nr_connections: value.nr_connections as u32,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_profile_computes_ideal_correctly() {
+        let profile = NetworkProfile::AllToAll(AllToAll {
+            rtt: Microsecs::new(100),
+            bandwidth: Mbps::new(10_000),
+        });
+        let size = Bytes::new(1_000_000_000);
+        assert_eq!(profile.ideal_latency(size), Nanosecs::new(800_100_000))
     }
 }

@@ -9,7 +9,7 @@ service EmuManager {
 
     rpc Check(google.protobuf.Empty) returns (CheckResponse);
 
-    rpc Run(RunSpecification) returns (google.protobuf.Empty);
+    rpc Run(RunInput) returns (google.protobuf.Empty);
 
     rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
 }
@@ -31,9 +31,23 @@ message CheckResponse {
 message RunSpecification {
     repeated P2PWorkload p2p_workloads = 1;
     Ecdf size_distribution = 2;
-    uint32 probe_rate_mbps = 3;
-    uint32 probe_duration_secs = 4;
-    repeated uint64 output_buckets = 5;
+    repeated uint64 output_buckets = 3;
+}
+
+message AllToAll {
+    uint64 rtt_us = 1;
+    uint32 bandwidth_mbps = 2;
+}
+
+message NetworkProfile {
+    oneof profile_type {
+        AllToAll all_to_all = 1;
+    }
+}
+
+message RunInput {
+    RunSpecification run_spec = 1;
+    NetworkProfile network_profile = 2;
 }
 
 message ExponentialShape {}
@@ -77,7 +91,7 @@ service EmuWorker {
 
     rpc Check(google.protobuf.Empty) returns (google.protobuf.Empty);
 
-    rpc Run(RunSpecification) returns (google.protobuf.Empty);
+    rpc Run(RunInput) returns (google.protobuf.Empty);
 
     rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
 
