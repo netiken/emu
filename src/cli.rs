@@ -47,7 +47,10 @@ pub enum Command {
     },
     Run {
         #[arg(short, long)]
-        input: PathBuf,
+        spec: PathBuf,
+
+        #[arg(short, long)]
+        profile: PathBuf,
 
         #[arg(short, long)]
         manager_addr: SocketAddr,
@@ -95,11 +98,15 @@ impl Command {
                 println!("Manager is up, and {} workers are up.", nr_workers);
             }
             Command::Run {
-                input,
+                spec,
+                profile,
                 manager_addr,
             } => {
-                let input = fs::read_to_string(input)?;
-                let input: crate::RunInput = serde_json::from_str(&input)?;
+                let spec: crate::RunSpecification =
+                    serde_json::from_str(&fs::read_to_string(spec)?)?;
+                let profile: crate::NetworkProfile =
+                    serde_json::from_str(&fs::read_to_string(profile)?)?;
+                let input = crate::RunInput { spec, profile };
                 run(input, manager_addr).await?;
             }
             Command::Stop { manager_addr } => {
