@@ -14,14 +14,14 @@ use tonic::{
 };
 
 use crate::{
-    distribution::{DistShape, Ecdf, GenF64, SampleWithBucket},
+    distribution::{DistShape, Ecdf, GenF64},
     proto::{self, emu_worker_client::EmuWorkerClient, emu_worker_server::EmuWorker},
-    units::{BitsPerSec, Bytes, Dscp, Mbps, Nanosecs, Secs},
+    units::{BitsPerSec, Bytes, Dscp, Mbps, Microsecs, Nanosecs, Secs},
     util::http::HttpConnector,
-    Error, RunSpecification,
+    Error, NetworkProfile, PingRequest, PingResponse, RunInput,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     mem::MaybeUninit,
     net::{IpAddr, SocketAddr},
     sync::{
@@ -29,9 +29,6 @@ use std::{
         Arc,
     },
 };
-
-// This map stores minimum measured latencies by bucket between a pair of workers.
-type LatencyMap = HashMap<usize, Duration>;
 
 #[nutype::nutype(derive(
     Debug,
@@ -71,42 +68,6 @@ impl Worker {
             ))
         })
     }
-
-    async fn probe_all(
-        &self,
-        spec: &RunSpecification,
-    ) -> Result<HashMap<WorkerId, LatencyMap>, Status> {
-        let destinations = spec
-            .p2p_workloads
-            .iter()
-            .filter_map(|w| (w.src == self.id).then_some(w.dst))
-            .collect::<HashSet<_>>();
-        let mut id2map = HashMap::new();
-        let mut handles = Vec::new();
-        for dst in destinations {
-            let address = self.addr_or_err(dst)?;
-            let ctx = ProbeContext {
-                client: connect(address, None).await?,
-                sizes: Arc::clone(&spec.size_distribution),
-                deltas: DistShape::Constant,
-                target_rate: spec.probe_rate,
-                duration: spec.probe_duration,
-                should_stop: Arc::clone(&self.is_stopped),
-            };
-            let handle = task::spawn(async move {
-                let map = ctx.run().await?;
-                Result::<_, Status>::Ok((dst, map))
-            });
-            handles.push(handle);
-        }
-        for handle in handles {
-            let (dst, map) = handle
-                .await
-                .map_err(|e| Status::from_error(Box::new(e)))??;
-            id2map.insert(dst, map);
-        }
-        Ok(id2map)
-    }
 }
 
 #[tonic::async_trait]
@@ -133,35 +94,33 @@ impl EmuWorker for Worker {
         Ok(Response::new(()))
     }
 
-    async fn run(&self, request: Request<proto::RunSpecification>) -> Result<Response<()>, Status> {
+    async fn run(&self, request: Request<proto::RunInput>) -> Result<Response<()>, Status> {
         self.is_stopped.store(false, Ordering::Relaxed);
-        let spec = RunSpecification::try_from(request.into_inner())
+        let RunInput { spec, profile } = RunInput::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
-        let latency_maps = self.probe_all(&spec).await?;
         let mut handles = Vec::new();
-        let mut histograms = HashMap::<Dscp, Histogram>::new();
+        let mut histograms = HashMap::<Dscp, Arc<DashMap<usize, Histogram>>>::new();
         for workload in spec.p2p_workloads {
             if workload.src != self.id {
                 continue;
             }
             // Prepare the point-to-point context.
             let address = self.addr_or_err(workload.dst)?;
-            let histogram = histograms.entry(workload.dscp).or_insert_with(
-                || metrics::histogram!("slowdown", "dscp" => workload.dscp.to_string()),
-            );
+            let histograms = histograms
+                .entry(workload.dscp)
+                .or_insert_with(|| Arc::new(DashMap::new()));
             let rate_per_connection = divvy_rate(workload.target_rate, workload.nr_connections);
             for _ in 0..workload.nr_connections {
                 let ctx = RunContext {
                     client: connect(address, Some(workload.dscp)).await?,
+                    dscp: workload.dscp,
                     sizes: Arc::clone(&spec.size_distribution),
                     deltas: workload.delta_distribution_shape,
                     target_rate: rate_per_connection,
                     duration: workload.duration,
-                    histogram: histogram.clone(),
-                    latency_map: latency_maps
-                        .get(&workload.dst)
-                        .expect("Missing latency map")
-                        .to_owned(),
+                    histograms: Arc::clone(histograms),
+                    network_profile: profile.clone(),
+                    output_buckets: spec.output_buckets.clone(),
                     should_stop: Arc::clone(&self.is_stopped),
                 };
                 // Initiate the workload.
@@ -177,6 +136,31 @@ impl EmuWorker for Worker {
         Ok(Response::new(()))
     }
 
+    async fn ping(
+        &self,
+        request: Request<proto::PingRequest>,
+    ) -> Result<Response<proto::PingResponse>, Status> {
+        let ping = PingRequest::try_from(request.into_inner())
+            .map_err(|e| Status::from_error(Box::new(e)))?;
+        let address = self.addr_or_err(ping.dst)?;
+        let mut client = connect(address, None).await?;
+        let mut times = Vec::new();
+        for _ in 0..10 {
+            let now = Instant::now();
+            client
+                .generic_rpc(Request::new(proto::GenericRequestResponse {
+                    data: Vec::new(),
+                }))
+                .await
+                .expect("Failed to send RPC");
+            let latency = Microsecs::new(now.elapsed().as_micros() as u64);
+            times.push(latency);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        let response = PingResponse { times };
+        Ok(Response::new(response.into()))
+    }
+
     async fn generic_rpc(
         &self,
         _: Request<proto::GenericRequestResponse>,
@@ -190,13 +174,15 @@ impl EmuWorker for Worker {
 #[derivative(Debug)]
 struct RunContext {
     client: EmuWorkerClient<Channel>,
+    dscp: Dscp,
     sizes: Arc<Ecdf>,
     deltas: DistShape,
     target_rate: Mbps,
     duration: Secs,
     #[derivative(Debug = "ignore")]
-    histogram: Histogram,
-    latency_map: LatencyMap,
+    histograms: Arc<DashMap<usize, Histogram>>,
+    network_profile: NetworkProfile,
+    output_buckets: Vec<Bytes>,
     should_stop: Arc<AtomicBool>,
 }
 
@@ -210,16 +196,9 @@ impl RunContext {
         let end = now + duration;
         while now < end && !self.should_stop() {
             // Generate the next RPC request payload.
-            let SampleWithBucket {
-                bucket,
-                sample: size,
-            } = Distribution::<SampleWithBucket>::sample(&*self.sizes, &mut rng);
+            let size = Distribution::<f64>::sample(&*self.sizes, &mut rng);
             let data = mk_uninit_bytes(size as usize);
-            let min_latency = self.latency_map.get(&bucket).copied().ok_or_else(|| {
-                Status::failed_precondition(format!(
-                    "Unable to find min latency for bucket {bucket}. Use a longer probe duration."
-                ))
-            })?;
+            let ideal_latency = self.network_profile.ideal_latency(Bytes::new(size as u64));
 
             // Wait until the next RPC time.
             let delta = deltas.gen(&mut rng).round() as u64;
@@ -228,7 +207,28 @@ impl RunContext {
 
             // Start the next RPC.
             let mut client = self.client.clone();
-            let histogram = self.histogram.clone();
+            let size = size as u64;
+            let output_bucket = self
+                .output_buckets
+                .iter()
+                .enumerate()
+                .find_map(|(i, b)| (size <= b.into_inner()).then_some(i))
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!(
+                        "Unable to find output bucket for size {size}."
+                    ))
+                })?;
+            let histogram = self
+                .histograms
+                .entry(output_bucket)
+                .or_insert_with(|| {
+                    metrics::histogram!(
+                        "slowdown",
+                        "dscp" => self.dscp.to_string(),
+                        "bucket" => output_bucket.to_string()
+                    )
+                })
+                .clone();
             task::spawn(async move {
                 let now = Instant::now();
                 client
@@ -236,72 +236,12 @@ impl RunContext {
                     .await
                     .expect("Failed to send RPC");
                 let latency = now.elapsed();
-                let slowdown = latency.as_nanos() as f64 / min_latency.as_nanos() as f64;
+                let slowdown = latency.as_nanos() as f64 / ideal_latency.into_inner() as f64;
                 histogram.record(slowdown);
             });
             now = Instant::now();
         }
         Ok(())
-    }
-
-    #[inline]
-    fn should_stop(&self) -> bool {
-        self.should_stop.load(Ordering::Relaxed)
-    }
-}
-
-#[derive(Clone, Derivative)]
-#[derivative(Debug)]
-struct ProbeContext {
-    client: EmuWorkerClient<Channel>,
-    sizes: Arc<Ecdf>,
-    deltas: DistShape,
-    target_rate: Mbps,
-    duration: Secs,
-    should_stop: Arc<AtomicBool>,
-}
-
-impl ProbeContext {
-    async fn run(&self) -> Result<LatencyMap, Status> {
-        let mut rng = StdRng::from_entropy();
-        let mut handles = Vec::new();
-        let deltas = delta_distribution(&self.sizes, DistShape::Constant, self.target_rate)
-            .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
-        let duration = Duration::from_secs(self.duration.into_inner() as u64);
-        let mut now = Instant::now();
-        let end = now + duration;
-        while now < end && !self.should_stop() {
-            // Generate the next RPC request payload.
-            let SampleWithBucket {
-                bucket,
-                sample: size,
-            } = Distribution::<SampleWithBucket>::sample(&*self.sizes, &mut rng);
-            let data = mk_uninit_bytes(size as usize);
-
-            // Wait until the next RPC time.
-            let delta = deltas.gen(&mut rng).round() as u64;
-            let timer = async_timer::new_timer(Duration::from_nanos(delta));
-            timer.await;
-
-            // Start the next RPC.
-            let mut client = self.client.clone();
-            handles.push(task::spawn(async move {
-                let now = Instant::now();
-                client
-                    .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
-                    .await
-                    .expect("Failed to send RPC");
-                (bucket, now.elapsed())
-            }));
-            now = Instant::now();
-        }
-        let mut latency_map = HashMap::new();
-        for handle in handles {
-            let (bucket, elapsed) = handle.await.map_err(|e| Status::from_error(Box::new(e)))?;
-            let min = latency_map.entry(bucket).or_insert(elapsed);
-            *min = std::cmp::min(*min, elapsed);
-        }
-        Ok(latency_map)
     }
 
     #[inline]
