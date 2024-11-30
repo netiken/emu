@@ -206,6 +206,8 @@ pub struct P2PWorkload {
     pub dscp: Dscp,
     pub delta_distribution_shape: DistShape,
     pub target_rate: Mbps,
+    #[serde(default)]
+    pub start: Secs,
     pub duration: Secs,
     pub nr_connections: usize,
 }
@@ -231,6 +233,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
                 DistShape::LogNormal { sigma: shape.sigma }
             }
         };
+        let start = Secs::new(proto.start_secs);
         let target_rate = Mbps::new(proto.target_rate_mbps);
         let duration = Secs::new(proto.duration_secs);
         Ok(Self {
@@ -239,6 +242,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
             dscp,
             delta_distribution_shape,
             target_rate,
+            start,
             duration,
             nr_connections: proto.nr_connections as usize,
         })
@@ -264,6 +268,7 @@ impl From<P2PWorkload> for proto::P2pWorkload {
                     _ => unimplemented!(),
                 },
             }),
+            start_secs: value.start.into_inner(),
             target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
             nr_connections: value.nr_connections as u32,

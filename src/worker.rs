@@ -6,7 +6,7 @@ use metrics::Histogram;
 use rand::prelude::*;
 use tokio::{
     task,
-    time::{Duration, Instant},
+    time::{self, Duration, Instant},
 };
 use tonic::{
     transport::{Channel, Endpoint},
@@ -25,7 +25,7 @@ use std::{
     mem::MaybeUninit,
     net::{IpAddr, SocketAddr},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
 };
@@ -48,7 +48,7 @@ pub struct WorkerId(u32);
 pub struct Worker {
     id: WorkerId,
     wid2addr: DashMap<WorkerId, WorkerAddress>,
-    is_stopped: Arc<AtomicBool>,
+    generation: Arc<AtomicU32>,
 }
 
 impl Worker {
@@ -56,7 +56,7 @@ impl Worker {
         Self {
             id,
             wid2addr: DashMap::new(),
-            is_stopped: Arc::new(AtomicBool::new(true)),
+            generation: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -90,12 +90,11 @@ impl EmuWorker for Worker {
     }
 
     async fn stop(&self, _: Request<()>) -> Result<Response<()>, Status> {
-        self.is_stopped.store(true, Ordering::Relaxed);
+        self.generation.fetch_add(1, Ordering::Relaxed);
         Ok(Response::new(()))
     }
 
     async fn run(&self, request: Request<proto::RunInput>) -> Result<Response<()>, Status> {
-        self.is_stopped.store(false, Ordering::Relaxed);
         let RunInput { spec, profile } = RunInput::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
         let mut handles = Vec::new();
@@ -117,11 +116,13 @@ impl EmuWorker for Worker {
                     sizes: Arc::clone(&spec.size_distribution),
                     deltas: workload.delta_distribution_shape,
                     target_rate: rate_per_connection,
+                    start: workload.start,
                     duration: workload.duration,
                     histograms: Arc::clone(histograms),
                     network_profile: profile.clone(),
                     output_buckets: spec.output_buckets.clone(),
-                    should_stop: Arc::clone(&self.is_stopped),
+                    generation: self.generation.load(Ordering::Relaxed),
+                    cur_generation: Arc::clone(&self.generation),
                 };
                 // Initiate the workload.
                 let handle = task::spawn(async move { ctx.run().await });
@@ -178,22 +179,30 @@ struct RunContext {
     sizes: Arc<Ecdf>,
     deltas: DistShape,
     target_rate: Mbps,
+    start: Secs,
     duration: Secs,
     #[derivative(Debug = "ignore")]
     histograms: Arc<DashMap<usize, Histogram>>,
     network_profile: NetworkProfile,
     output_buckets: Vec<Bytes>,
-    should_stop: Arc<AtomicBool>,
+    generation: u32,
+    cur_generation: Arc<AtomicU32>,
 }
 
 impl RunContext {
     async fn run(&self) -> Result<(), Status> {
+        // Wait until the start time.
+        time::sleep(Duration::from_secs(self.start.into_inner() as u64)).await;
+
+        // Intialize the workload.
         let mut rng = StdRng::from_entropy();
         let deltas = delta_distribution(&self.sizes, self.deltas, self.target_rate)
             .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
         let duration = Duration::from_secs(self.duration.into_inner() as u64);
         let mut now = Instant::now();
         let end = now + duration;
+
+        // Generate RPCs.
         while now < end && !self.should_stop() {
             // Generate the next RPC request payload.
             let size = Distribution::<f64>::sample(&*self.sizes, &mut rng);
@@ -246,7 +255,7 @@ impl RunContext {
 
     #[inline]
     fn should_stop(&self) -> bool {
-        self.should_stop.load(Ordering::Relaxed)
+        self.generation != self.cur_generation.load(Ordering::Relaxed)
     }
 }
 

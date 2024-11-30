@@ -71,8 +71,9 @@ message P2PWorkload {
     google.protobuf.UInt32Value dscp = 3;
     DistShape delta_distribution_shape = 4;
     uint32 target_rate_mbps = 5;
-    uint32 duration_secs = 6;
-    uint32 nr_connections = 7;
+    uint32 start_secs = 6;
+    uint32 duration_secs = 7;
+    uint32 nr_connections = 8;
 }
 
 message Ecdf {

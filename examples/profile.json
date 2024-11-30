@@ -1,0 +1,6 @@
+{
+  "AllToAll": {
+    "rtt": 300,
+    "bandwidth": 10000
+  }
+}
