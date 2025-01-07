@@ -145,8 +145,9 @@ impl EmuWorker for Worker {
         let mut times = Vec::new();
         for _ in 0..10 {
             let mut stream = TcpStream::connect(address.data_addr()).await?;
+            let data = mk_uninit_bytes(0);
             let now = Instant::now();
-            stream.write_all(&[0; 1]).await?;
+            stream.write_all(&data).await?;
             let mut ack = [0u8; 1];
             stream.read_exact(&mut ack).await?;
             let latency = Microsecs::new(now.elapsed().as_micros() as u64);
