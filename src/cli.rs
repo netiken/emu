@@ -244,7 +244,7 @@ fn init_metrics(addr: SocketAddr, buckets: &[f64]) -> anyhow::Result<()> {
 }
 
 async fn data_server(port: u16) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
     loop {
         let (mut socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
