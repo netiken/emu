@@ -15,7 +15,7 @@ use crate::{
 use clap::Subcommand;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     signal, task,
     time::{self, Duration},
@@ -248,19 +248,30 @@ async fn data_server(port: u16) -> anyhow::Result<()> {
     loop {
         let (mut socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            let mut buf = [0; 1024]; // TODO: allow bigger messages sizes
-            loop {
-                match socket.read(&mut buf).await {
-                    Ok(0) => {
-                        break;
+            let mut prefix = [0u8; std::mem::size_of::<u64>()];
+            // Read the message size.
+            socket
+                .read_exact(&mut prefix)
+                .await
+                .expect("Failed to read size prefix");
+            let size = u64::from_le_bytes(prefix) as usize;
+
+            // Read the data in chunks.
+            let mut bytes_remaining = size;
+            let mut buf = [0u8; 4096];
+            while bytes_remaining > 0 {
+                let bytes_to_read = std::cmp::min(bytes_remaining, buf.len());
+                match socket.read_exact(&mut buf[..bytes_to_read]).await {
+                    Ok(_) => {
+                        bytes_remaining -= bytes_to_read;
                     }
-                    Ok(_) => {}
                     Err(e) => {
-                        eprintln!("Error on connection from {}: {}", addr, e);
+                        eprintln!("Error reading data from {}: {}", addr, e);
                         break;
                     }
                 }
             }
+            socket.write_all(&[0; 1]).await.expect("Error writing ACK");
         });
     }
 }

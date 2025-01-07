@@ -5,7 +5,7 @@ use derivative::Derivative;
 use metrics::Histogram;
 use rand::prelude::*;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
     task,
     time::{self, Duration, Instant},
@@ -236,6 +236,11 @@ impl RunContext {
                     .write_all(&data)
                     .await
                     .expect("Failed to write to stream");
+                let mut ack = [0u8; 1];
+                stream
+                    .read_exact(&mut ack)
+                    .await
+                    .expect("Failed to read ACK");
                 let latency = now.elapsed();
                 let slowdown = latency.as_nanos() as f64 / ideal_latency.into_inner() as f64;
                 histogram.record(slowdown);
@@ -253,10 +258,15 @@ impl RunContext {
 
 #[inline]
 fn mk_uninit_bytes(size: usize) -> Vec<u8> {
-    let mut vec = Vec::<MaybeUninit<u8>>::with_capacity(size);
+    let sz_prefix = std::mem::size_of::<u64>();
+    let sz_total = sz_prefix + size;
+    let mut vec = Vec::<MaybeUninit<u8>>::with_capacity(sz_total);
     unsafe {
-        vec.set_len(size);
-        std::mem::transmute::<Vec<MaybeUninit<u8>>, Vec<u8>>(vec)
+        vec.set_len(sz_total);
+        let mut vec = std::mem::transmute::<Vec<MaybeUninit<u8>>, Vec<u8>>(vec);
+        let prefix = (size as u64).to_le_bytes();
+        vec[..sz_prefix].copy_from_slice(&prefix);
+        vec
     }
 }
 
