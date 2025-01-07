@@ -5,19 +5,17 @@ use derivative::Derivative;
 use metrics::Histogram;
 use rand::prelude::*;
 use tokio::{
+    io::AsyncWriteExt,
+    net::{TcpSocket, TcpStream},
     task,
     time::{self, Duration, Instant},
 };
-use tonic::{
-    transport::{Channel, Endpoint},
-    Request, Response, Status,
-};
+use tonic::{Request, Response, Status};
 
 use crate::{
     distribution::{DistShape, Ecdf, GenF64},
-    proto::{self, emu_worker_client::EmuWorkerClient, emu_worker_server::EmuWorker},
+    proto::{self, emu_worker_server::EmuWorker},
     units::{BitsPerSec, Bytes, Dscp, Mbps, Microsecs, Nanosecs, Secs},
-    util::http::HttpConnector,
     Error, NetworkProfile, PingRequest, PingResponse, RunInput,
 };
 use std::{
@@ -108,10 +106,10 @@ impl EmuWorker for Worker {
             let histograms = histograms
                 .entry(workload.dscp)
                 .or_insert_with(|| Arc::new(DashMap::new()));
-            let rate_per_connection = divvy_rate(workload.target_rate, workload.nr_connections);
-            for _ in 0..workload.nr_connections {
+            let rate_per_connection = divvy_rate(workload.target_rate, workload.nr_workers);
+            for _ in 0..workload.nr_workers {
                 let ctx = RunContext {
-                    client: connect(address, Some(workload.dscp)).await?,
+                    addr: address.data_addr(),
                     dscp: workload.dscp,
                     sizes: Arc::clone(&spec.size_distribution),
                     deltas: workload.delta_distribution_shape,
@@ -144,16 +142,11 @@ impl EmuWorker for Worker {
         let ping = PingRequest::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
         let address = self.addr_or_err(ping.dst)?;
-        let mut client = connect(address, None).await?;
         let mut times = Vec::new();
         for _ in 0..10 {
+            let mut stream = TcpStream::connect(address.data_addr()).await?;
             let now = Instant::now();
-            client
-                .generic_rpc(Request::new(proto::GenericRequestResponse {
-                    data: Vec::new(),
-                }))
-                .await
-                .expect("Failed to send RPC");
+            stream.write_all(&[0; 1]).await?;
             let latency = Microsecs::new(now.elapsed().as_micros() as u64);
             times.push(latency);
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -161,20 +154,12 @@ impl EmuWorker for Worker {
         let response = PingResponse { times };
         Ok(Response::new(response.into()))
     }
-
-    async fn generic_rpc(
-        &self,
-        _: Request<proto::GenericRequestResponse>,
-    ) -> Result<Response<proto::GenericRequestResponse>, tonic::Status> {
-        let response = proto::GenericRequestResponse { data: Vec::new() };
-        Ok(Response::new(response))
-    }
 }
 
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
 struct RunContext {
-    client: EmuWorkerClient<Channel>,
+    addr: SocketAddr,
     dscp: Dscp,
     sizes: Arc<Ecdf>,
     deltas: DistShape,
@@ -215,7 +200,6 @@ impl RunContext {
             timer.await;
 
             // Start the next RPC.
-            let mut client = self.client.clone();
             let size = size as u64;
             let output_bucket = self
                 .output_buckets
@@ -238,12 +222,20 @@ impl RunContext {
                     )
                 })
                 .clone();
+            let addr = self.addr;
+            let dscp = self.dscp;
             task::spawn(async move {
+                let socket = TcpSocket::new_v4().expect("Failed to create socket");
+                socket
+                    .set_tos(dscp.into_inner() << 2)
+                    .expect("Failed to set TOS");
+                socket.set_reuseaddr(true).expect("Failed to set reuseaddr");
+                let mut stream = socket.connect(addr).await.expect("Failed to connect");
                 let now = Instant::now();
-                client
-                    .generic_rpc(Request::new(proto::GenericRequestResponse { data }))
+                stream
+                    .write_all(&data)
                     .await
-                    .expect("Failed to send RPC");
+                    .expect("Failed to write to stream");
                 let latency = now.elapsed();
                 let slowdown = latency.as_nanos() as f64 / ideal_latency.into_inner() as f64;
                 histogram.record(slowdown);
@@ -257,25 +249,6 @@ impl RunContext {
     fn should_stop(&self) -> bool {
         self.generation != self.cur_generation.load(Ordering::Relaxed)
     }
-}
-
-async fn connect(
-    addr: WorkerAddress,
-    dscp: Option<Dscp>,
-) -> Result<EmuWorkerClient<Channel>, Status> {
-    let addr = addr.socket_addr();
-    let endpoint = format!("http://{}", addr);
-    let mut connector = HttpConnector::new();
-    if let Some(dscp) = dscp {
-        let tos = dscp.into_inner() << 2;
-        connector.set_tos(Some(tos));
-    }
-    let channel = Endpoint::try_from(endpoint)
-        .map_err(|e| Status::from_error(Box::new(e)))?
-        .connect_with_connector(connector)
-        .await
-        .map_err(|e| Status::from_error(Box::new(e)))?;
-    Ok(EmuWorkerClient::new(channel))
 }
 
 #[inline]
@@ -330,12 +303,18 @@ impl TryFrom<proto::WorkerRegistration> for WorkerRegistration {
 
 #[derive(Debug, Clone, Copy)]
 pub struct WorkerAddress {
-    inner: SocketAddr,
+    pub ip_address: IpAddr,
+    pub control_port: u16,
+    pub data_port: u16,
 }
 
 impl WorkerAddress {
-    pub fn socket_addr(&self) -> SocketAddr {
-        self.inner
+    pub fn control_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.ip_address, self.control_port)
+    }
+
+    pub fn data_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.ip_address, self.data_port)
     }
 }
 
@@ -344,9 +323,12 @@ impl TryFrom<proto::WorkerAddress> for WorkerAddress {
 
     fn try_from(proto: proto::WorkerAddress) -> Result<Self, Self::Error> {
         let ip_address: IpAddr = proto.ip_address.parse()?;
-        let port = proto.port as u16;
+        let control_port = proto.control_port as u16;
+        let data_port = proto.data_port as u16;
         Ok(Self {
-            inner: SocketAddr::new(ip_address, port),
+            ip_address,
+            control_port,
+            data_port,
         })
     }
 }

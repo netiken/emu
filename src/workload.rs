@@ -209,7 +209,7 @@ pub struct P2PWorkload {
     #[serde(default)]
     pub start: Secs,
     pub duration: Secs,
-    pub nr_connections: usize,
+    pub nr_workers: usize,
 }
 
 impl TryFrom<proto::P2pWorkload> for P2PWorkload {
@@ -244,7 +244,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
             target_rate,
             start,
             duration,
-            nr_connections: proto.nr_connections as usize,
+            nr_workers: proto.nr_workers as usize,
         })
     }
 }
@@ -271,7 +271,7 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             start_secs: value.start.into_inner(),
             target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
-            nr_connections: value.nr_connections as u32,
+            nr_workers: value.nr_workers as u32,
         }
     }
 }

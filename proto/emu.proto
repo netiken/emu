@@ -23,7 +23,8 @@ message WorkerRegistration {
 
 message WorkerAddress {
     string ip_address = 1;
-    uint32 port = 2;
+    uint32 control_port = 2;
+    uint32 data_port = 3;
 }
 
 message CheckResponse {
@@ -73,7 +74,7 @@ message P2PWorkload {
     uint32 target_rate_mbps = 5;
     uint32 start_secs = 6;
     uint32 duration_secs = 7;
-    uint32 nr_connections = 8;
+    uint32 nr_workers = 8;
 }
 
 message Ecdf {
@@ -108,8 +109,6 @@ service EmuWorker {
     rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
 
     rpc Ping(PingRequest) returns (PingResponse);
-
-    rpc GenericRpc(GenericRequestResponse) returns (GenericRequestResponse);
 }
 
 message WorkerAddressMap {
