@@ -147,6 +147,8 @@ impl EmuWorker for Worker {
             let mut stream = TcpStream::connect(address.data_addr()).await?;
             let now = Instant::now();
             stream.write_all(&[0; 1]).await?;
+            let mut ack = [0u8; 1];
+            stream.read_exact(&mut ack).await?;
             let latency = Microsecs::new(now.elapsed().as_micros() as u64);
             times.push(latency);
             tokio::time::sleep(Duration::from_secs(1)).await;
