@@ -11,12 +11,16 @@ cargo run --release manager --port 50000
 # Start the workers (however many you want)
 cargo run --release worker \
     --id 0 \
-    --advertise-addr 127.0.0.1:50001 \
+    --advertise-ip 127.0.0.1 \
+    --control-port 50001 \
+    --data-port 50002 \
     --manager-addr 127.0.0.1:50000 \
     --metrics-addr 0.0.0.0:9001
 cargo run --release worker \
     --id 1 \
-    --advertise-addr 127.0.0.1:50002 \
+    --advertise-ip 127.0.0.1 \
+    --control-port 50002 \
+    --data-port 50003 \
     --manager-addr 127.0.0.1:50000 \
     --metrics-addr 0.0.0.0:9002
 
