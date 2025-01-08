@@ -11,7 +11,7 @@
       },
       "target_rate": 2000,
       "duration": 120,
-      "nr_connections": 2
+      "nr_workers": 10
     }
   ],
   "size_distribution": {

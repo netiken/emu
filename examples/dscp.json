@@ -11,7 +11,7 @@
       },
       "target_rate": 250,
       "duration": 120,
-      "nr_connections": 2
+      "nr_workers": 2
     },
     {
       "src": 1,
@@ -24,7 +24,7 @@
       },
       "target_rate": 250,
       "duration": 120,
-      "nr_connections": 2
+      "nr_workers": 2
     }
   ],
   "size_distribution": {
