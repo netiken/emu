@@ -24,7 +24,7 @@ impl EmuManager for Manager {
         let reg =
             WorkerRegistration::try_from(proto).map_err(|e| Status::from_error(Box::new(e)))?;
         self.wid2addr.insert(reg.id, reg.address);
-        let client = EmuWorkerClient::connect(format!("http://{}", reg.address.socket_addr()))
+        let client = EmuWorkerClient::connect(format!("http://{}", reg.address.control_addr()))
             .await
             .map_err(|e| Status::from_error(Box::new(e)))?;
         self.wid2client.insert(reg.id, client);
@@ -81,9 +81,17 @@ impl Manager {
                 .iter()
                 .map(|entry| {
                     let (wid, addr) = entry.pair();
-                    let ip_address = addr.socket_addr().ip().to_string();
-                    let port = addr.socket_addr().port() as u32;
-                    (wid.into_inner(), proto::WorkerAddress { ip_address, port })
+                    let ip_address = addr.ip_address.to_string();
+                    let control_port = addr.control_port as u32;
+                    let data_port = addr.data_port as u32;
+                    (
+                        wid.into_inner(),
+                        proto::WorkerAddress {
+                            ip_address,
+                            control_port,
+                            data_port,
+                        },
+                    )
                 })
                 .collect();
             proto::WorkerAddressMap { workers }

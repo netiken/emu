@@ -9,9 +9,6 @@ use crate::{
     Error, WorkerId,
 };
 
-// gRPC limits the maximum messages size to 4MB.
-pub const SZ_GRPC_MAX: usize = 4 * 1024 * 1024;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunInput {
     pub spec: RunSpecification,
@@ -91,14 +88,6 @@ impl TryFrom<proto::RunSpecification> for RunSpecification {
         let size_distribution = proto
             .size_distribution
             .ok_or(Error::MissingField("size_distribution"))?;
-        let &proto::CdfPoint { x: max, .. } = size_distribution
-            .points
-            .last()
-            .ok_or(Error::Ecdf(EcdfError::NoValues))?;
-        let max = max.ceil() as usize;
-        if max >= SZ_GRPC_MAX {
-            return Err(Error::MaxMessageSize(max));
-        }
         let size_distribution = Arc::new(Ecdf::try_from(size_distribution)?);
         let output_buckets = proto.output_buckets.into_iter().map(Bytes::new).collect();
         Ok(Self {
@@ -209,7 +198,7 @@ pub struct P2PWorkload {
     #[serde(default)]
     pub start: Secs,
     pub duration: Secs,
-    pub nr_connections: usize,
+    pub nr_workers: usize,
 }
 
 impl TryFrom<proto::P2pWorkload> for P2PWorkload {
@@ -244,7 +233,7 @@ impl TryFrom<proto::P2pWorkload> for P2PWorkload {
             target_rate,
             start,
             duration,
-            nr_connections: proto.nr_connections as usize,
+            nr_workers: proto.nr_workers as usize,
         })
     }
 }
@@ -271,7 +260,7 @@ impl From<P2PWorkload> for proto::P2pWorkload {
             start_secs: value.start.into_inner(),
             target_rate_mbps: value.target_rate.into_inner(),
             duration_secs: value.duration.into_inner(),
-            nr_connections: value.nr_connections as u32,
+            nr_workers: value.nr_workers as u32,
         }
     }
 }

@@ -1,4 +1,9 @@
-use std::{fs, net::SocketAddr, path::PathBuf, process};
+use std::{
+    fs,
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    process,
+};
 
 use crate::{
     proto::{
@@ -10,6 +15,8 @@ use crate::{
 use clap::Subcommand;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
     signal, task,
     time::{self, Duration},
 };
@@ -30,7 +37,13 @@ pub enum Command {
         id: WorkerId,
 
         #[arg(short, long)]
-        advertise_addr: SocketAddr,
+        advertise_ip: IpAddr,
+
+        #[arg(short, long)]
+        control_port: u16,
+
+        #[arg(short, long)]
+        data_port: u16,
 
         #[arg(short, long)]
         manager_addr: SocketAddr,
@@ -84,24 +97,29 @@ impl Command {
             }
             Command::Worker {
                 id,
-                advertise_addr,
+                advertise_ip,
+                control_port,
+                data_port,
                 manager_addr,
                 metrics_addr,
                 buckets,
             } => {
                 init_metrics(metrics_addr, &buckets)?;
-                let handle = task::spawn(async move {
+                // Start the gRPC control server.
+                let control_server = task::spawn(async move {
                     let worker = Worker::new(id);
-                    let addr = format!("0.0.0.0:{}", advertise_addr.port()).parse()?;
+                    let addr = format!("0.0.0.0:{}", control_port).parse()?;
                     Server::builder()
                         .add_service(EmuWorkerServer::new(worker))
                         .serve(addr)
                         .await?;
                     anyhow::Result::<()>::Ok(())
                 });
-                time::sleep(Duration::from_millis(10)).await; // wait for server startup
-                register_worker(id, advertise_addr, manager_addr).await?;
-                handle.await??;
+                // Start the TCP data server.
+                let data_server = task::spawn(data_server(data_port));
+                time::sleep(Duration::from_millis(10)).await; // wait for servers to startup
+                register_worker(id, advertise_ip, control_port, data_port, manager_addr).await?;
+                let (_, _) = tokio::join!(control_server, data_server);
             }
             Command::Check { manager_addr } => {
                 let nr_workers = check(manager_addr).await?;
@@ -167,13 +185,15 @@ pub async fn run(input: crate::RunInput, manager_addr: SocketAddr) -> anyhow::Re
 
 async fn register_worker(
     id: WorkerId,
-    advertise_addr: SocketAddr,
+    advertise_ip: IpAddr,
+    control_port: u16,
+    data_port: u16,
     manager_addr: SocketAddr,
 ) -> Result<(), tonic::Status> {
     const MAX_ATTEMPTS: usize = 6;
     const RETRY_DELAY: Duration = Duration::from_secs(10);
     for _ in 0..MAX_ATTEMPTS {
-        match try_register_worker(id, advertise_addr, manager_addr).await {
+        match try_register_worker(id, advertise_ip, control_port, data_port, manager_addr).await {
             Ok(_) => {
                 println!("Worker registered successfully.");
                 return Ok(());
@@ -194,15 +214,18 @@ async fn register_worker(
 
 async fn try_register_worker(
     id: WorkerId,
-    advertise_addr: SocketAddr,
+    advertise_ip: IpAddr,
+    control_port: u16,
+    data_port: u16,
     manager_addr: SocketAddr,
 ) -> Result<(), tonic::Status> {
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr))
         .await
         .map_err(|e| Status::from_error(Box::new(e)))?;
     let address = WorkerAddress {
-        ip_address: advertise_addr.ip().to_string(),
-        port: advertise_addr.port() as u32,
+        ip_address: advertise_ip.to_string(),
+        control_port: control_port as u32,
+        data_port: data_port as u32,
     };
     let request = Request::new(WorkerRegistration {
         id: Some(id.into_inner()),
@@ -218,4 +241,37 @@ fn init_metrics(addr: SocketAddr, buckets: &[f64]) -> anyhow::Result<()> {
         .set_buckets(buckets)?
         .install()?;
     Ok(())
+}
+
+async fn data_server(port: u16) -> anyhow::Result<()> {
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    loop {
+        let (mut socket, addr) = listener.accept().await?;
+        tokio::spawn(async move {
+            let mut prefix = [0u8; std::mem::size_of::<u64>()];
+            // Read the message size.
+            socket
+                .read_exact(&mut prefix)
+                .await
+                .expect("Failed to read size prefix");
+            let size = u64::from_le_bytes(prefix) as usize;
+
+            // Read the data in chunks.
+            let mut bytes_remaining = size;
+            let mut buf = [0u8; 4096];
+            while bytes_remaining > 0 {
+                let bytes_to_read = std::cmp::min(bytes_remaining, buf.len());
+                match socket.read_exact(&mut buf[..bytes_to_read]).await {
+                    Ok(_) => {
+                        bytes_remaining -= bytes_to_read;
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading data from {}: {}", addr, e);
+                        break;
+                    }
+                }
+            }
+            socket.write_all(&[0; 1]).await.expect("Error writing ACK");
+        });
+    }
 }
