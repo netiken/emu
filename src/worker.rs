@@ -7,6 +7,7 @@ use rand::prelude::*;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
+    sync::mpsc,
     task,
     time::{self, Duration, Instant},
 };
@@ -190,6 +191,20 @@ impl RunContext {
         let mut now = Instant::now();
         let end = now + duration;
 
+        // Error handling: create a channel and a task to listen for errors.
+        let (tx, mut rx) = mpsc::unbounded_channel::<Status>();
+        let cur_generation = Arc::clone(&self.cur_generation);
+        let err_handle = tokio::spawn(async move {
+            match rx.recv().await {
+                Some(err) => {
+                    // Stop the workload generation.
+                    cur_generation.fetch_add(1, Ordering::Relaxed);
+                    Err(err)
+                }
+                None => Ok(()),
+            }
+        });
+
         // Generate RPCs.
         while now < end && !self.should_stop() {
             // Generate the next RPC request payload.
@@ -227,30 +242,51 @@ impl RunContext {
                 .clone();
             let addr = self.addr;
             let dscp = self.dscp;
+            let tx = tx.clone();
             task::spawn(async move {
-                let socket = TcpSocket::new_v4().expect("Failed to create socket");
-                socket
-                    .set_tos(dscp.into_inner() << 2)
-                    .expect("Failed to set TOS");
-                socket.set_reuseaddr(true).expect("Failed to set reuseaddr");
-                let mut stream = socket.connect(addr).await.expect("Failed to connect");
-                let now = Instant::now();
-                stream
-                    .write_all(&data)
-                    .await
-                    .expect("Failed to write to stream");
-                let mut ack = [0u8; 1];
-                stream
-                    .read_exact(&mut ack)
-                    .await
-                    .expect("Failed to read ACK");
-                let latency = now.elapsed();
-                let slowdown = latency.as_nanos() as f64 / ideal_latency.into_inner() as f64;
-                histogram.record(slowdown);
+                let result: Result<(), Status> = async {
+                    let socket = TcpSocket::new_v4().map_err(|e| {
+                        Status::resource_exhausted(format!("Failed to create socket: {}", e))
+                    })?;
+                    socket.set_tos(dscp.into_inner() << 2).map_err(|e| {
+                        Status::invalid_argument(format!("Failed to set TOS: {}", e))
+                    })?;
+                    socket
+                        .set_reuseaddr(true)
+                        .map_err(|e| Status::internal(format!("Failed to set reuseaddr: {}", e)))?;
+                    let mut stream = socket
+                        .connect(addr)
+                        .await
+                        .map_err(|e| Status::unavailable(format!("Failed to connect: {}", e)))?;
+                    let now = Instant::now();
+                    stream.write_all(&data).await.map_err(|e| {
+                        Status::unavailable(format!("Failed to write to stream: {}", e))
+                    })?;
+                    let mut ack = [0u8; 1];
+                    stream
+                        .read_exact(&mut ack)
+                        .await
+                        .map_err(|e| Status::unavailable(format!("Failed to read ACK: {}", e)))?;
+                    let latency = now.elapsed();
+                    let slowdown = latency.as_nanos() as f64 / ideal_latency.into_inner() as f64;
+                    histogram.record(slowdown);
+                    Ok(())
+                }
+                .await;
+
+                if let Err(e) = result {
+                    let _ = tx.send(e);
+                }
             });
             now = Instant::now();
         }
-        Ok(())
+
+        // Signal to the error handler that the workload has completed.
+        drop(tx);
+
+        err_handle
+            .await
+            .map_err(|e| Status::from_error(Box::new(e)))?
     }
 
     #[inline]
