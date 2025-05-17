@@ -381,3 +381,24 @@ impl TryFrom<proto::WorkerAddress> for WorkerAddress {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delta_distribution_returns_constant_mean() {
+        let sizes = Arc::new(Ecdf::from_ecdf(vec![(0.0, 0.0), (100.0, 100.0)]).unwrap());
+        let gen = delta_distribution(&sizes, DistShape::Constant, Mbps::new(8)).unwrap();
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..5 {
+            assert_eq!(gen.gen(&mut rng).round() as u64, 50_000);
+        }
+    }
+
+    #[test]
+    fn divvy_rate_rounds_as_expected() {
+        assert_eq!(divvy_rate(Mbps::new(10), 3), Mbps::new(3));
+        assert_eq!(divvy_rate(Mbps::new(1), 2), Mbps::new(1));
+    }
+}

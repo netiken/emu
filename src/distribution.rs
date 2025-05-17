@@ -269,3 +269,28 @@ pub fn read_ecdf(path: impl AsRef<Path>) -> anyhow::Result<Ecdf> {
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(Ecdf::from_ecdf(v)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ecdf_from_values_handles_duplicates() {
+        let ecdf = Ecdf::from_values(&[1.0, 2.0, 2.0, 3.0]).unwrap();
+        let points: Vec<_> = ecdf.points().collect();
+        let expected = vec![(1.0, 25.0), (2.0, 75.0), (3.0, 100.0)];
+        assert_eq!(points.len(), expected.len());
+        for ((x0, y0), (x1, y1)) in points.into_iter().zip(expected) {
+            assert!((x0 - x1).abs() < f64::EPSILON);
+            assert!((y0 - y1).abs() < f64::EPSILON);
+        }
+    }
+
+    #[test]
+    fn ecdf_mean_computes_piecewise_linear_mean() {
+        let values = [1.0, 2.0, 3.0];
+        let ecdf = Ecdf::from_values(&values).unwrap();
+        let expected = 4.0 / 3.0;
+        assert!((ecdf.mean() - expected).abs() < 1e-6);
+    }
+}

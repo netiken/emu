@@ -332,4 +332,34 @@ mod tests {
         let size = Bytes::new(1_000_000_000);
         assert_eq!(profile.ideal_latency(size), Nanosecs::new(800_100_000))
     }
+
+    #[test]
+    fn run_specification_counts_unique_workers() {
+        let workload1 = P2PWorkload {
+            src: WorkerId::new(0),
+            dst: WorkerId::new(1),
+            dscp: Dscp::try_new(0).unwrap(),
+            delta_distribution_shape: DistShape::Exponential,
+            target_rate: Mbps::new(1),
+            start: Secs::new(0),
+            duration: Secs::new(1),
+            nr_workers: 1,
+        };
+        let workload2 = P2PWorkload {
+            src: WorkerId::new(1),
+            dst: WorkerId::new(2),
+            dscp: Dscp::try_new(0).unwrap(),
+            delta_distribution_shape: DistShape::Exponential,
+            target_rate: Mbps::new(1),
+            start: Secs::new(0),
+            duration: Secs::new(1),
+            nr_workers: 1,
+        };
+        let spec = RunSpecification {
+            p2p_workloads: vec![workload1, workload2],
+            size_distribution: Arc::new(Ecdf::from_values(&[1.0]).unwrap()),
+            output_buckets: vec![Bytes::new(1)],
+        };
+        assert_eq!(spec.nr_workers().unwrap(), 3);
+    }
 }
