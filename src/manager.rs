@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task;
 use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
@@ -12,6 +13,7 @@ use crate::{proto, PingRequest, RunInput};
 pub struct Manager {
     wid2addr: DashMap<WorkerId, WorkerAddress>,
     wid2client: DashMap<WorkerId, EmuWorkerClient<Channel>>,
+    running: AtomicBool,
 }
 
 #[tonic::async_trait]
@@ -45,15 +47,33 @@ impl EmuManager for Manager {
     }
 
     async fn run(&self, request: Request<proto::RunInput>) -> Result<Response<()>, Status> {
-        let spec = RunInput::try_from(request.into_inner())
-            .map_err(|e| Status::from_error(Box::new(e)))?;
-        self.introduce_peers_to_workers().await?;
-        self.run_workers(spec).await?;
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(Status::failed_precondition(
+                "workload already running; call stop before running again",
+            ));
+        }
+
+        let result: Result<(), Status> = async {
+            let spec = RunInput::try_from(request.into_inner())
+                .map_err(|e| Status::from_error(Box::new(e)))?;
+            self.introduce_peers_to_workers().await?;
+            self.run_workers(spec).await
+        }
+        .await;
+
+        self.running.store(false, Ordering::SeqCst);
+
+        result?;
         Ok(Response::new(()))
     }
 
     async fn stop(&self, _: Request<()>) -> Result<Response<()>, Status> {
         self.stop_workers().await?;
+        self.running.store(false, Ordering::SeqCst);
         Ok(Response::new(()))
     }
 

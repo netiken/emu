@@ -29,3 +29,9 @@ prometheus --config.file examples/prometheus.yml
 
 # Start a workload
 cargo run --release run --spec examples/single.json --manager-addr 127.0.0.1:50000
+
+# Stop the workload (required before starting another run)
+cargo run --release stop --manager-addr 127.0.0.1:50000
+```
+
+You must stop a workload before starting a new `run`.
