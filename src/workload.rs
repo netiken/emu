@@ -67,12 +67,11 @@ impl RunSpecification {
 
     /// Gets the running duration of this experiment, not including the probe duration.
     pub fn run_duration(&self) -> Result<Secs, Error> {
-        Ok(self
-            .p2p_workloads
+        self.p2p_workloads
             .iter()
             .map(|workload| workload.duration)
             .max()
-            .unwrap())
+            .ok_or(Error::NoP2pWorkloads)
     }
 }
 
@@ -322,6 +321,7 @@ impl From<PingResponse> for proto::PingResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn network_profile_computes_ideal_correctly() {
@@ -361,5 +361,48 @@ mod tests {
             output_buckets: vec![Bytes::new(1)],
         };
         assert_eq!(spec.nr_workers().unwrap(), 3);
+    }
+
+    #[test]
+    fn run_duration_returns_max() {
+        let ecdf = Arc::new(Ecdf::from_values(&[1.0]).unwrap());
+        let spec = RunSpecification {
+            p2p_workloads: vec![
+                P2PWorkload {
+                    src: WorkerId::new(0),
+                    dst: WorkerId::new(1),
+                    dscp: Dscp::try_new(0).unwrap(),
+                    delta_distribution_shape: DistShape::Exponential,
+                    target_rate: Mbps::new(1),
+                    start: Secs::new(0),
+                    duration: Secs::new(5),
+                    nr_workers: 1,
+                },
+                P2PWorkload {
+                    src: WorkerId::new(1),
+                    dst: WorkerId::new(0),
+                    dscp: Dscp::try_new(0).unwrap(),
+                    delta_distribution_shape: DistShape::Exponential,
+                    target_rate: Mbps::new(1),
+                    start: Secs::new(0),
+                    duration: Secs::new(10),
+                    nr_workers: 1,
+                },
+            ],
+            size_distribution: ecdf,
+            output_buckets: vec![],
+        };
+        assert_eq!(spec.run_duration().unwrap(), Secs::new(10));
+    }
+
+    #[test]
+    fn run_duration_errors_when_empty() {
+        let ecdf = Arc::new(Ecdf::from_values(&[1.0]).unwrap());
+        let spec = RunSpecification {
+            p2p_workloads: vec![],
+            size_distribution: ecdf,
+            output_buckets: vec![],
+        };
+        assert!(matches!(spec.run_duration(), Err(Error::NoP2pWorkloads)));
     }
 }
