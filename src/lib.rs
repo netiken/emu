@@ -29,6 +29,9 @@ pub enum Error {
     #[error("invalid DSCP value {0}")]
     InvalidDscp(u32),
 
+    #[error("no p2p workloads specified")]
+    NoP2pWorkloads,
+
     #[error("eCDF error: {0}")]
     Ecdf(#[from] EcdfError),
 }
