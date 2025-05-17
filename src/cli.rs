@@ -173,13 +173,21 @@ pub async fn run(input: crate::RunInput, manager_addr: SocketAddr) -> anyhow::Re
     let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
     let mut client_ = client.clone();
     task::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for Ctrl-C");
-        println!("Ctrl-C received, aborting...");
-        client_
-            .stop(Request::new(()))
-            .await
-            .expect("Failed to stop worker");
-        process::abort();
+        match signal::ctrl_c().await {
+            Ok(()) => println!("Ctrl-C received, aborting..."),
+            Err(e) => {
+                println!("Failed to listen for Ctrl-C: {e}");
+                process::abort();
+            }
+        }
+
+        match client_.stop(Request::new(())).await {
+            Ok(_) => process::exit(0),
+            Err(e) => {
+                println!("Failed to stop worker: {e}");
+                process::abort();
+            }
+        }
     });
     let input: RunInput = input.into();
     let request = Request::new(input);
