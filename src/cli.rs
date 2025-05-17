@@ -274,7 +274,10 @@ async fn data_server(port: u16) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_connection(mut socket: tokio::net::TcpStream, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+async fn handle_connection(
+    mut socket: tokio::net::TcpStream,
+    addr: std::net::SocketAddr,
+) -> anyhow::Result<()> {
     let mut prefix = [0u8; std::mem::size_of::<u64>()];
     // Read the message size.
     socket
@@ -288,12 +291,16 @@ async fn handle_connection(mut socket: tokio::net::TcpStream, addr: std::net::So
     let mut buf = [0u8; 4096];
     while bytes_remaining > 0 {
         let bytes_to_read = std::cmp::min(bytes_remaining, buf.len());
-        socket.read_exact(&mut buf[..bytes_to_read]).await
+        socket
+            .read_exact(&mut buf[..bytes_to_read])
+            .await
             .map_err(|e| anyhow::anyhow!("Error reading data from {}: {}", addr, e))?;
         bytes_remaining -= bytes_to_read;
     }
-    
-    socket.write_all(&[0; 1]).await
+
+    socket
+        .write_all(&[0; 1])
+        .await
         .map_err(|e| anyhow::anyhow!("Error writing ACK to {}: {}", addr, e))?;
     Ok(())
 }
