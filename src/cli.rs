@@ -257,37 +257,21 @@ fn init_metrics(addr: SocketAddr, buckets: &[f64]) -> anyhow::Result<()> {
 
 async fn data_server(port: u16) -> anyhow::Result<()> {
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
-    
-    // Create a channel for error propagation
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<anyhow::Error>(100);
-    
-    // Spawn a task to accept connections
-    let accept_task = tokio::spawn(async move {
-        loop {
-            match listener.accept().await {
-                Ok((socket, addr)) => {
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_connection(socket, addr).await {
-                            let _ = tx.send(e).await;
-                        }
-                    });
-                }
-                Err(e) => {
-                    let _ = tx.send(anyhow::anyhow!("Accept error: {}", e)).await;
-                    break;
-                }
+
+    loop {
+        match listener.accept().await {
+            Ok((socket, addr)) => {
+                tokio::spawn(async move {
+                    if let Err(e) = handle_connection(socket, addr).await {
+                        eprintln!("Data connection error from {}: {}", addr, e);
+                    }
+                });
+            }
+            Err(e) => {
+                eprintln!("Accept error: {}", e);
             }
         }
-    });
-    
-    // Wait for the first error to occur
-    if let Some(err) = rx.recv().await {
-        accept_task.abort(); // Stop accepting new connections
-        return Err(err);
     }
-    
-    Ok(())
 }
 
 async fn handle_connection(mut socket: tokio::net::TcpStream, addr: std::net::SocketAddr) -> anyhow::Result<()> {
