@@ -59,12 +59,12 @@ impl Worker {
         }
     }
 
-    fn addr_or_err(&self, wid: WorkerId) -> Result<WorkerAddress, Status> {
+    fn addr_or_err(&self, wid: WorkerId) -> Result<WorkerAddress, Box<Status>> {
         self.wid2addr.get(&wid).map(|a| *a).ok_or_else(|| {
-            Status::not_found(format!(
+            Box::new(Status::not_found(format!(
                 "Worker {} does not know about worker {}",
                 self.id, wid
-            ))
+            )))
         })
     }
 }
@@ -103,7 +103,7 @@ impl EmuWorker for Worker {
                 continue;
             }
             // Prepare the point-to-point context.
-            let address = self.addr_or_err(workload.dst)?;
+            let address = self.addr_or_err(workload.dst).map_err(|e| *e)?;
             let histograms = histograms
                 .entry(workload.dscp)
                 .or_insert_with(|| Arc::new(DashMap::new()));
@@ -142,7 +142,7 @@ impl EmuWorker for Worker {
     ) -> Result<Response<proto::PingResponse>, Status> {
         let ping = PingRequest::try_from(request.into_inner())
             .map_err(|e| Status::from_error(Box::new(e)))?;
-        let address = self.addr_or_err(ping.dst)?;
+        let address = self.addr_or_err(ping.dst).map_err(|e| *e)?;
         let mut times = Vec::new();
         for _ in 0..10 {
             let mut stream = TcpStream::connect(address.data_addr()).await?;
@@ -186,7 +186,7 @@ impl RunContext {
         // Intialize the workload.
         let mut rng = StdRng::from_entropy();
         let deltas = delta_distribution(&self.sizes, self.deltas, self.target_rate)
-            .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {}", e)))?;
+            .map_err(|e| Status::invalid_argument(format!("invalid delta distribution: {e}")))?;
         let duration = Duration::from_secs(self.duration.into_inner() as u64);
         let mut now = Instant::now();
         let end = now + duration;
@@ -246,27 +246,27 @@ impl RunContext {
             task::spawn(async move {
                 let result: Result<(), Status> = async {
                     let socket = TcpSocket::new_v4().map_err(|e| {
-                        Status::resource_exhausted(format!("Failed to create socket: {}", e))
-                    })?;
-                    socket.set_tos(dscp.into_inner() << 2).map_err(|e| {
-                        Status::invalid_argument(format!("Failed to set TOS: {}", e))
+                        Status::resource_exhausted(format!("Failed to create socket: {e}"))
                     })?;
                     socket
+                        .set_tos(dscp.into_inner() << 2)
+                        .map_err(|e| Status::invalid_argument(format!("Failed to set TOS: {e}")))?;
+                    socket
                         .set_reuseaddr(true)
-                        .map_err(|e| Status::internal(format!("Failed to set reuseaddr: {}", e)))?;
+                        .map_err(|e| Status::internal(format!("Failed to set reuseaddr: {e}")))?;
                     let mut stream = socket
                         .connect(addr)
                         .await
-                        .map_err(|e| Status::unavailable(format!("Failed to connect: {}", e)))?;
+                        .map_err(|e| Status::unavailable(format!("Failed to connect: {e}")))?;
                     let now = Instant::now();
                     stream.write_all(&data).await.map_err(|e| {
-                        Status::unavailable(format!("Failed to write to stream: {}", e))
+                        Status::unavailable(format!("Failed to write to stream: {e}"))
                     })?;
                     let mut ack = [0u8; 1];
                     stream
                         .read_exact(&mut ack)
                         .await
-                        .map_err(|e| Status::unavailable(format!("Failed to read ACK: {}", e)))?;
+                        .map_err(|e| Status::unavailable(format!("Failed to read ACK: {e}")))?;
                     let latency = now.elapsed();
                     let slowdown = latency.as_nanos() as f64 / ideal_latency.into_inner() as f64;
                     histogram.record(slowdown);
