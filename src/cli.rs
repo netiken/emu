@@ -89,7 +89,7 @@ impl Command {
         match self {
             Command::Manager { port } => {
                 let manager = Manager::default();
-                let addr = format!("0.0.0.0:{}", port).parse()?;
+                let addr = format!("0.0.0.0:{port}").parse()?;
                 Server::builder()
                     .add_service(EmuManagerServer::new(manager))
                     .serve(addr)
@@ -108,7 +108,7 @@ impl Command {
                 // Start the gRPC control server.
                 let control_server = task::spawn(async move {
                     let worker = Worker::new(id);
-                    let addr = format!("0.0.0.0:{}", control_port).parse()?;
+                    let addr = format!("0.0.0.0:{control_port}").parse()?;
                     Server::builder()
                         .add_service(EmuWorkerServer::new(worker))
                         .serve(addr)
@@ -127,7 +127,7 @@ impl Command {
             }
             Command::Check { manager_addr } => {
                 let nr_workers = check(manager_addr).await?;
-                println!("Manager is up, and {} workers are up.", nr_workers);
+                println!("Manager is up, and {nr_workers} workers are up.");
             }
             Command::Run {
                 spec,
@@ -143,7 +143,7 @@ impl Command {
             }
             Command::Stop { manager_addr } => {
                 let mut client =
-                    EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+                    EmuManagerClient::connect(format!("http://{manager_addr}")).await?;
                 client.stop(Request::new(())).await?;
             }
             Command::Ping {
@@ -152,7 +152,7 @@ impl Command {
                 dst,
             } => {
                 let mut client =
-                    EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+                    EmuManagerClient::connect(format!("http://{manager_addr}")).await?;
                 let ping = crate::PingRequest { src, dst };
                 let response = client.ping(Request::new(ping.into())).await?;
                 let response = response.into_inner();
@@ -164,13 +164,13 @@ impl Command {
 }
 
 pub async fn check(manager_addr: SocketAddr) -> anyhow::Result<usize> {
-    let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+    let mut client = EmuManagerClient::connect(format!("http://{manager_addr}")).await?;
     let response = client.check(Request::new(())).await?;
     Ok(response.get_ref().nr_workers.unwrap() as usize)
 }
 
 pub async fn run(input: crate::RunInput, manager_addr: SocketAddr) -> anyhow::Result<()> {
-    let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr)).await?;
+    let mut client = EmuManagerClient::connect(format!("http://{manager_addr}")).await?;
     let mut client_ = client.clone();
     task::spawn(async move {
         match signal::ctrl_c().await {
@@ -220,7 +220,7 @@ async fn register_worker(
             e => return e,
         }
     }
-    println!("Failed to register worker after {} attempts.", MAX_ATTEMPTS);
+    println!("Failed to register worker after {MAX_ATTEMPTS} attempts.");
     Err(Status::unavailable("Manager unavailable"))
 }
 
@@ -231,7 +231,7 @@ async fn try_register_worker(
     data_port: u16,
     manager_addr: SocketAddr,
 ) -> Result<(), tonic::Status> {
-    let mut client = EmuManagerClient::connect(format!("http://{}", manager_addr))
+    let mut client = EmuManagerClient::connect(format!("http://{manager_addr}"))
         .await
         .map_err(|e| Status::from_error(Box::new(e)))?;
     let address = WorkerAddress {
@@ -263,12 +263,12 @@ async fn data_server(port: u16) -> anyhow::Result<()> {
             Ok((socket, addr)) => {
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(socket, addr).await {
-                        eprintln!("Data connection error from {}: {}", addr, e);
+                        eprintln!("Data connection error from {addr}: {e}");
                     }
                 });
             }
             Err(e) => {
-                eprintln!("Accept error: {}", e);
+                eprintln!("Accept error: {e}");
             }
         }
     }
@@ -283,7 +283,7 @@ async fn handle_connection(
     socket
         .read_exact(&mut prefix)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read size prefix from {}: {}", addr, e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to read size prefix from {addr}: {e}"))?;
     let size = u64::from_le_bytes(prefix) as usize;
 
     // Read the data in chunks.
@@ -294,13 +294,13 @@ async fn handle_connection(
         socket
             .read_exact(&mut buf[..bytes_to_read])
             .await
-            .map_err(|e| anyhow::anyhow!("Error reading data from {}: {}", addr, e))?;
+            .map_err(|e| anyhow::anyhow!("Error reading data from {addr}: {e}"))?;
         bytes_remaining -= bytes_to_read;
     }
 
     socket
         .write_all(&[0; 1])
         .await
-        .map_err(|e| anyhow::anyhow!("Error writing ACK to {}: {}", addr, e))?;
+        .map_err(|e| anyhow::anyhow!("Error writing ACK to {addr}: {e}"))?;
     Ok(())
 }
